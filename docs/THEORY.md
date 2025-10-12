@@ -1,6 +1,6 @@
 # LC-Seq Theoretical Foundations
 
-**Last Updated**: 2025-10-09
+**Last Updated**: 2025-10-12
 **Purpose**: Foundational concepts, mathematical structures, and domain vocabulary for the LC-Seq analysis system
 
 ---
@@ -14,170 +14,19 @@
 3. [Hierarchical Relationships](#part-3-hierarchical-relationships)
 4. [Graph Properties and Patterns](#part-4-graph-properties-and-patterns)
 
-**II. ANALYSIS METHODS** 5. [Peak Detection Mathematical Foundations](#part-5-peak-detection-mathematical-foundations) 6. [Synthesis Validation Theory](#part-6-synthesis-validation-theory)
+**II. ANALYSIS METHODS**
 
-**III. COMPUTATIONAL IMPLEMENTATION** 7. [Mathematical Optimizations](#part-7-mathematical-optimizations)
+5. [Peak Detection Mathematical Foundations](#part-5-peak-detection-mathematical-foundations)
+6. [Synthesis Validation Theory](#part-6-synthesis-validation-theory)
 
-**IV. REFERENCE** 8. [Domain Vocabulary](#part-8-domain-vocabulary-ubiquitous-language) 9. [Appendix: Quick Reference](#appendix-quick-reference)
+**III. COMPUTATIONAL IMPLEMENTATION**
 
----
+7. [Mathematical Optimizations](#part-7-mathematical-optimizations)
 
-## Vocabulary and Ubiquitous Language
+**IV. REFERENCE**
 
-This section defines all technical terms used throughout theory and implementation.
-
-### Core Structures
-
-**Hierarchy**
-- **Domain term** for compound truncation structure
-- Intuitive term used in code, variables, and general discussion
-- **Formally**: a partially ordered set (poset) represented as directed acyclic graph (DAG)
-- **When to use**: Default term in all contexts
-- **See**: THEORY.md Section 1.1 for formal mathematical definition
-
-**Poset (Partially Ordered Set)**
-- **Mathematical term** emphasizing order-theoretic properties
-- Used when discussing formal properties: reflexive, antisymmetric, transitive
-- Provides connection to order theory results (principal ideals, filters, lattice theory)
-- **When to use**: Mathematical proofs, formal property discussions
-- **See**: THEORY.md Section 1.1 for axioms, Section 3.2 for operations
-
-**DAG (Directed Acyclic Graph)**
-- **Computational term** emphasizing graph structure and algorithms
-- Used when discussing algorithms: topological sort, path finding, traversal, complexity
-- Guarantees existence of topological ordering (acyclicity)
-- **When to use**: Algorithm design, complexity analysis, implementation details
-- **See**: THEORY.md Section 1.1 for properties, Section 7.1 for algorithms
-
-**Relationship**: These three terms describe the same structure at different levels:
-- Hierarchy (domain/intuitive) → Poset (mathematical) → DAG (computational)
-- All three are correct; use the term appropriate for your context
-
-**Quotient Hierarchy**
-- Hierarchy formed by grouping compounds into equivalence classes
-- One node per equivalence class (multiple positional variants collapse to single node)
-- **Mathematically**: quotient poset (P/R where R is equivalence relation)
-- **Construction**: Edge projection from original hierarchy onto equivalence classes
-- **Implementation**: `quotient_hierarchy` variable in `ProcessPooledChromatogramsUseCase`
-- **See**: THEORY.md Section 4.2.11 for edge projection algorithm
-
-### Pooled Mode (Statistical Aggregation)
-
-**Pooled Mode**
-- Analysis mode where positional variants are grouped and their signals aggregated
-- Uses **mean or median** aggregation (pooled statistics from biostatistics)
-- **NOT "consensus"** (which implies mode/voting in bioinformatics)
-- Provides ~3-10× speedup: detect peaks once per equivalence class
-- Fallback to individual mode if correlation < 0.8
-- **Implementation**: `ProcessPooledChromatogramsUseCase`
-- **See**: THEORY.md Section 4.2 for complete workflow
-
-**Pooled Signal/Chromatogram**
-- Result of aggregating (mean/median) signals from positional variants
-- **Terminology**: "Pooled" is standard biostatistics term (pooled variance, pooled analysis, meta-analysis)
-- **NOT "consensus"** (consensus = mode in bioinformatics, not mean/median)
-- Computed by `SignalAggregator.aggregate()` service
-- **See**: THEORY.md Section 4.2.4 for aggregation mathematics
-
-**PooledCompound**
-- Proxy object containing pooled chromatogram for equivalence class
-- Delegates most properties to representative (template) compound
-- Overrides `.chromatogram` property to return pooled chromatogram
-- Allows pooled signals to be processed through standard pipeline
-- **Design pattern**: Delegation Proxy (Gang of Four)
-- **Implementation**: `src/lcseq/domain/entities/pooled_compound.py`
-- **See**: THEORY.md Section 4.2.8 for proxy pattern details
-
-**Pooling Status** (enum: `PoolingStatus`)
-- Quality assessment of signal aggregation
-- **POOLING_VALID**: min correlation ≥ 0.8 (variants agree, pooling reliable)
-- **POOLING_INVALID**: min correlation < 0.8 (variants differ, use individual signals)
-- **NOT_ATTEMPTED**: single variant (no aggregation needed)
-- **Implementation**: `EquivalenceClass.pooling_status` property
-- **See**: THEORY.md Section 4.2.5 for correlation validation
-
-### Equivalence and Grouping
-
-**Equivalence Class**
-- Set of positional variants sharing same `block_support_sequence`
-- Same chemical identity at block/monomer level, different synthesis paths
-- Grouped together for pooled mode analysis
-- **Example**: "Val-Leu" = {[Val,Leu,Null], [Val,Null,Leu], [Null,Val,Leu]}
-- **Implementation**: `EquivalenceClass` model
-- **See**: THEORY.md Section 4.2.1 for grouping algorithm
-
-**Block Support Sequence**
-- Chemical identity at block/monomer level (**position-independent**)
-- Non-null building blocks/monomers in canonical order
-- Used as equivalence class key
-- **Example**: "Val-Leu" (same regardless of positions)
-- **Replaces**: deprecated term "residue_sequence"
-- **See**: THEORY.md Section 2.3 for definition
-
-**Positional Block Sequence**
-- Synthesis path (**position-dependent** encoding)
-- Complete building block sequence including nulls and positions
-- **Example**: "Val-Null-Leu" ≠ "Null-Val-Leu" (different synthesis paths)
-- **Replaces**: deprecated term "positional_sequence"
-- **See**: THEORY.md Section 2.2 for definition
-
-### Implementation Traceability
-
-Each concept links to:
-- **Theory**: THEORY.md section with formal definition and proofs
-- **Implementation**: Specific class/method/file in codebase
-- **Tests**: Unit and integration tests verifying correctness
-
-For detailed code-to-theory mappings, see "Theoretical Foundation" sections in docstrings.
-
-### Peak Classification and Validation
-
-**Peak Type Classification**
-- Classification of detected peaks based on retention time position and DAG constraints
-- Four classification types from chromatographic analysis:
-  - **NULL**: Peak at L₀ retention time (DNA tag only, no peptide)
-  - **TRUNCATION**: Peak matching ancestor product position (incomplete synthesis)
-  - **PUTATIVE_PRODUCT**: Peak positionally consistent with expected product elution
-  - **UNKNOWN**: Peak that cannot be classified (late-eluting, unmatched)
-- **CRITICAL**: Classification is a positional hypothesis, NOT chemical validation
-- "Putative" emphasizes inference from retention time, not confirmation by mass spectrometry
-- **Implementation**: `PeakType` enum in `src/lcseq/domain/entities/peak.py`
-- **See**: THEORY.md Section 5.3 for classification algorithm details
-
-**Validation Status**
-- Synthesis success assessment using adaptive Bayesian framework
-- **Independent from peak classification**: Can have PUTATIVE_PRODUCT peak but not VALIDATED synthesis
-- Six validation categories (confidence-based progression):
-  - **VALIDATED**: Synthesis succeeded with high confidence (strong evidence)
-  - **LIKELY_SUCCESS**: Synthesis probably succeeded (moderate confidence)
-  - **UNCERTAIN**: Ambiguous result - cannot determine success or failure
-  - **LIKELY_FAILURE**: Synthesis probably failed (moderate confidence)
-  - **FAILED**: Synthesis failed with high confidence (strong evidence against)
-  - **NOT_VALIDATED**: Validation not yet performed
-- **Implementation**: `ValidationStatus` enum in `src/lcseq/domain/entities/peak.py`
-- **See**: THEORY.md Section 6.10 for validation algorithm
-- **See**: THEORY.md Section 6.13 for classification vs validation distinction
-
-### Level and Hierarchy Metrics
-
-**Level (Truncation Level)**
-- Number of non-null building blocks in compound
-- **Level 0** (L₀): Complete truncation, all building blocks are null (DNA tag only)
-- **Level N**: Maximal compounds with N non-null building blocks
-- Used to organize compounds into hierarchy layers
-- **Property**: `compound.level` returns integer count
-- **Usage**: `hierarchy.get_level(k)` returns all compounds at level k
-- **See**: THEORY.md Section 3.3 for hierarchy level properties
-
-**Monomer Level**
-- Total number of monomers after decomposing composite building blocks
-- Used exclusively in monomer hierarchy mode
-- May differ from building block level when composite blocks present
-- **Example**: Compound with [Leu-Ala-Val, Pro] has level=2 (two blocks) but monomer_level=4 (four monomers)
-- Enables finer-grained hierarchy analysis at monomer granularity
-- **Property**: `compound.monomer_level` returns integer count
-- **See**: THEORY.md Section 1.5.3 for monomer-level decomposition
-- **See**: THEORY.md Section 4.2.3 for monomer mode hierarchy
+8. [Domain Vocabulary](#part-8-domain-vocabulary-ubiquitous-language)
+9. [Appendix: Quick Reference](#appendix-quick-reference)
 
 ---
 
@@ -382,11 +231,13 @@ identical descendants because edges are based on subsequence relationships.
 **Building-block level compound**: `Leu-Leu-Ala-Val-Pro`
 
 Where position assignment (from library design) is:
+
 - Position 2: Leu (single monomer building block)
 - Position 1: Leu-Ala-Val (composite building block - 3 monomers)
 - Position 0: Pro (single monomer building block)
 
 **Key Point**: The sequence "Leu-Leu-Ala-Val-Pro" looks identical whether:
+
 - All 5 are individual monomer blocks, OR
 - Position 1 contains composite block "Leu-Ala-Val"
 
@@ -410,11 +261,13 @@ In monomer mode, the composite block "Leu-Ala-Val" decomposes into three individ
 **Key Distinction**: Building-block positions vs monomer sequence indices
 
 **Building-Block Mode**:
+
 - Positions are synthesis positions: 0, 1, 2, ... (from library design)
 - Position 1 might contain composite block "Leu-Ala-Val" (3 monomers)
 - These are distinct: Position ≠ Sequence Index
 
 **Monomer Mode - Complete Restructuring**:
+
 - Positions are discarded entirely
 - Graph vertices identified by monomer sequence only
 - Example: "Leu-Leu-Ala-Val-Pro" (5 monomers)
@@ -427,6 +280,7 @@ In monomer mode, the composite block "Leu-Ala-Val" decomposes into three individ
 **Example Showing Loss of Position**:
 
 Building-block mode (3 different vertices):
+
 - Vertex A: Position assignment {2:Leu, 1:Leu-Ala-Val, 0:Pro}
 - Vertex B: Position assignment {2:Pro, 1:Leu, 0:Leu-Ala-Val}
 - Vertex C: Position assignment {2:Leu-Ala-Val, 1:Pro, 0:Leu}
@@ -434,12 +288,14 @@ Building-block mode (3 different vertices):
 All three have different positional sequences (different synthesis paths).
 
 Monomer mode (1 vertex - convergence!):
+
 - Single vertex: "Leu-Leu-Ala-Val-Pro"
 - Position information gone
 - All three building-block vertices converge to this one monomer vertex
 - This is the "diamond convergence" pattern
 
 **Why This Matters**:
+
 - Alignment (Part 2.5) works differently in each mode
 - Building-block mode: Use positional alignment (unambiguous)
 - Monomer mode: Must use left/right-align with ambiguity flag
@@ -508,7 +364,8 @@ Each building block is a tripeptide (3 monomers)
 ```
 Total vertices: 4³ = 64 (including nulls)
 Max edges per vertex: 3 (one per position)
-Graph structure: Forest (no convergence)
+Graph structure: DAG with convergence at block granularity
+  - Positional variants with same block support converge to same equivalence class
 ```
 
 **Monomer-Level Mode**:
@@ -521,11 +378,12 @@ Graph structure: DAG with massive convergence
 Vertices: Thousands to millions (depending on library)
 ```
 
-**Why the Explosion**:
+**Why the Complexity Difference**:
 
-- Block mode: Position information prevents convergence
-- Monomer mode: Chemical identity independent of synthesis path
-- Same peptide synthesized via different paths → convergence → more complex graph
+- Block mode: Convergence at block granularity (coarser), fewer total sequences
+- Monomer mode: Convergence at monomer granularity (finer), many more sequences possible
+- Same peptide synthesized via different paths → convergence in both modes
+- Monomer mode has exponentially more possible sequences due to finer granularity
 
 #### 1.5.6 Edge Generation Algorithm (Monomer Mode)
 
@@ -592,6 +450,7 @@ Monomer Mode:
 **Sequence**: `Leu-Leu-Ala-Val-Pro`
 
 **Building-Block Level Interpretation**:
+
 - Position 2: Leu (single monomer block)
 - Position 1: Leu-Ala-Val (composite block containing 3 monomers)
 - Position 0: Pro (single monomer block)
@@ -734,6 +593,7 @@ The LC-Seq system uses three distinct sequence representations at different gran
 - Method: BuildingBlock.decompose_to_monomers()
 
 **Note on Terminology:**
+
 - "Support" refers to the mathematical concept: the domain where the function is non-zero/non-null
 - Nulls exist only at block level (synthesis positions); at monomer level there are no nulls by definition
 
@@ -741,507 +601,123 @@ The LC-Seq system uses three distinct sequence representations at different gran
 
 #### 2.3.1 Absolute Time Representation
 
-Chromatogram signals are defined over **absolute time** (seconds or minutes from injection). Peak retention times are scalar values representing the time at which a compound elutes.
-
-**Core Principle**: All retention time comparisons operate on scalar time values, independent of signal boundaries or sampling rates.
+Chromatogram signals are defined over **absolute time** (seconds or minutes from injection). All retention time comparisons operate on scalar time values, independent of signal boundaries or sampling rates.
 
 **Properties**:
 
-- Retention times are physically meaningful (not array indices)
-- Peak position comparisons: direct scalar arithmetic
-- Example: "Does peak at 45.2s match expected 45.0s?" → |45.2 - 45.0| = 0.2s
+- Retention times are physically meaningful scalar values (not array indices)
+- Peak comparisons use direct scalar arithmetic: |t_observed - t_expected|
+- Time units must be consistent across dataset (standard: seconds or minutes)
 
-**Time Units**:
+#### 2.3.2 When Alignment Is Needed
 
-- Standard: seconds (s) or minutes (min)
-- Must be consistent across dataset
-- Attribute: Chromatogram.time (array of time points)
+Signals from different runs may have variable start/end times due to manual timing variation or preprocessing.
 
-#### 2.3.2 Variable Signal Boundaries
+**No alignment required for core analysis**:
 
-Signals from different experimental runs may have different start and end times due to:
+- Peak detection (independent per signal)
+- Peak classification (scalar retention time matching)
+- Validation metrics (per-compound peak properties)
 
-- Manual data collection timing variation
-- Different run durations
-- Preprocessing operations (trimming, artifact removal)
+**Alignment required only for**:
 
-**Example**:
+- Similarity metrics (Wasserstein distance, Jensen-Shannon divergence)
+- Hierarchical clustering for visualization ordering
 
-- Signal A: t ∈ [600, 3600] seconds (10:00 to 60:00 min)
-- Signal B: t ∈ [610, 3630] seconds (10:10 to 60:30 min)
-- Signal C: t ∈ [595, 3590] seconds (9:55 to 59:50 min)
+#### 2.3.3 Alignment Algorithm (When Needed)
 
-**Impact on Analysis**:
+For similarity-based ordering, align signals to common time grid:
 
-**✅ No alignment required for**:
+1. **Global bounds**: t_min = min(all signals), t_max = max(all signals)
+2. **Common grid**: Use finest sampling resolution across signals
+3. **Interpolate**: Resample each signal onto common grid via linear interpolation
+4. **Compute**: Calculate similarity metrics on aligned signals
 
-- **Peak detection**: Each signal analyzed independently in its own time domain
-- **Peak classification**: Compares scalar retention times (position matching via absolute time)
-- **Retention order validation**: Scalar comparisons (t_product > t_truncation)
-- **Purity calculation**: Sum counts over peak regions per compound
-- **SNR calculation**: Ratio of intensities per compound
-- **Synthesis validation**: All metrics operate on peak positions or per-compound counts
+**Properties**: Minimal data loss, no padding assumptions, preserves peak positions.
 
-**⚠️ Alignment required for**:
+**Alternative**: Skip alignment if using non-similarity orderings (by level, sequence length, validation status).
 
-- **Similarity metrics**: Wasserstein distance, Jensen-Shannon divergence (signal-to-signal comparison)
-- **Hierarchical clustering**: Requires pairwise similarity matrix
-- **Similarity-based ordering**: For visualization (optional feature)
+#### 2.3.4 Mode-Specific Considerations
 
-#### 2.3.3 Simple Alignment for Similarity Metrics
+**Temporal alignment** (this section) aligns time grids for similarity metrics. This is distinct from **sequence alignment** for visualization.
 
-When similarity-based compound ordering is needed (hierarchical clustering for visualization), signals must be aligned to a common time grid.
+- **Building-block mode**: Position information preserved; use positional mapping for visualization
+- **Monomer mode**: Position information lost; use heuristic alignment (right/left-align) for visualization with ambiguity flag
 
-**Algorithm**:
-
-**Step 1: Define Global Time Window**
-
-Compute global bounds across all signals in dataset:
-t_min_global = min(signal.t_min for all signals)
-t_max_global = max(signal.t_max for all signals)
-
-This ensures all signals have real data coverage in the window (no padding needed).
-
-**Step 2: Construct Common Grid**
-
-Define uniform grid with finest sampling resolution:
-dt = min(signal.sampling_interval for all signals)
-t_grid = linspace(t_min_global, t_max_global, N)
-
-where N = (t_max_global - t_min_global) / dt
-
-**Step 3: Trim and Interpolate**
-
-For each signal S:
-
-1. **Trim**: Extract data where t ∈ [t_min_global, t_max_global]
-2. **Interpolate**: Use linear interpolation to resample onto t_grid
-3. **Store**: S.aligned_signal = interpolated values on t_grid
-
-**Step 4: Compute Similarity**
-
-For all signal pairs (A, B):
-similarity(A, B) = metric(A.aligned_signal, B.aligned_signal)
-
-where metric ∈ {Wasserstein distance, Jensen-Shannon divergence, etc.}
-
-**Properties**:
-
-- ✅ All signals have real data in [t_min_global, t_max_global] (by definition)
-- ✅ No boundary padding needed (no assumptions about signal outside range)
-- ✅ Minimal data loss (only extreme tails where one signal started earlier/ended later)
-- ✅ Consistent treatment across entire dataset
-- ✅ Preserves peak positions and relative intensities
-
-**Typical Data Loss**:
-For signals with 10-60 minute range and ±30 second variation:
-
-- Global window: ≈ [10:30, 59:30] = 49 minutes
-- Loss per signal: <1% of total duration
-- All critical peaks retained (products typically elute in middle of gradient)
-
-**When NOT to Use**:
-If similarity-based ordering is not required, skip alignment entirely. Use alternative orderings:
-
-- By hierarchy level (truncation rank)
-- By sequence length (number of building blocks)
-- By positional block sequence (lexicographic)
-- By validation status (VALIDATED first, etc.)
-
-**Computational Complexity**:
-
-- Finding global bounds: O(V) for V signals
-- Interpolation: O(V × n) where n = average signal length
-- Total alignment: O(V × n) per dataset
-
-#### 2.3.4 Alignment in Building-Block vs Monomer Mode
-
-**Critical Note**: The temporal alignment described above (for similarity metrics) is separate from **sequence alignment for visualization** (see examples in Part 1.5.3.1).
-
-**Building-Block Mode** (no sequence alignment ambiguity):
-- Position information preserved from synthesis
-- When visualizing lineages: align by synthesis position
-- Example: Position 7 in all variants aligns perfectly (even if composite block)
-- **No ambiguity** - positions are explicit from library design
-- Temporal alignment (this section) used only for similarity metrics
-
-**Monomer Mode** (sequence alignment IS ambiguous):
-- Position information discarded (graph restructured by chemical identity)
-- When visualizing lineages: must use heuristic (right-align or left-align)
-- Example: "Leu-Leu-Leu" could map to many position combinations
-- **Always ambiguous** when repeated residues present
-- Both temporal alignment (this section) AND sequence alignment needed
-
-**Key Distinction**:
-- **Temporal alignment** (Part 2.3): Aligning chromatogram time grids for similarity computation
-  - Needed: When computing signal similarity metrics
-  - Works on: Time points (seconds/minutes)
-  - Result: Common time grid for correlation/distance calculation
-
-- **Sequence alignment** (for visualization): Aligning sequences for display
-  - Needed: When visualizing lineages or comparing sequences
-  - Works on: Amino acid residues or building blocks
-  - Result: Sequences with gaps showing truncation patterns
-
-**Recommendation by Mode**:
-- Building-block mode → No sequence alignment issues (use positional mapping)
-- Monomer mode → Acknowledge alignment ambiguity (use right-align with flag)
-
-Both modes may need temporal alignment if computing similarity metrics for clustering/ordering.
+Both modes may need temporal alignment for similarity-based clustering. See Part 1.5.3.1 for sequence alignment details.
 
 ### 2.4 The Null Compound (L₀)
 
-#### 2.4.1 Chemical Definition
+#### 2.4.1 Chemical and Graph-Theoretic Definition
 
-**L₀** (the null compound) is defined as the compound with all building blocks set to null:
-L₀ = [Null, Null, ..., Null]
+**Definition**: L₀ = [Null, Null, ..., Null] is the compound with all building blocks set to null.
 
-**Physical Molecule**:
+**Physical Molecule**: DNA barcode tag + linker chemistry with **no peptide building blocks attached**. L₀ represents the starting scaffold before synthesis.
 
-- DNA barcode tag (for sequencing identification)
-- Linker chemistry (connects DNA to synthesis site)
-- Any protecting groups or caps from synthesis
-- **NO amino acids or building blocks attached**
+**Graph Properties**:
 
-**Chemical Interpretation**:
+- **Minimal element**: Unique bottom element in building-block mode DAG (∄C ∈ V such that C ≺ L₀)
+- **Universal descendant**: Every compound C can truncate to L₀ (∀C ∈ V, L₀ ≼ C)
+- **Topological role**: Anchor for bottom-up DAG traversal; constraint propagation starts here
 
-- L₀ represents the starting scaffold before peptide synthesis
-- Every library member begins as L₀, then building blocks are sequentially added
-- L₀ is the "bare tag" - the molecular entity present before any peptide construction
+#### 2.4.2 Retention Time Principle
 
-#### 2.4.2 Graph-Theoretic Properties
+**Hydrophobicity Ordering**: DNA tag is hydrophilic; peptides add hydrophobicity. H(C) = H₀ + Σ(H_building_block) → longer peptides elute later.
 
-**Minimal Element**:
+**Expected**: t(L₀) ≤ t(compounds with peptides). L₀ should elute in early chromatogram region.
 
-- L₀ is the unique minimal element in building-block mode DAG
-- No compound has fewer building blocks than L₀ (zero is minimum)
-- Formally: ∄C ∈ V such that C ≺ L₀
+**Exceptions** (rare): Highly charged peptides may violate ordering.
 
-**Universal Descendant Property**:
+#### 2.4.3 L₀ Peak Detection Algorithm
 
-- Every compound C can truncate to L₀ by removing all building blocks
-- Formally: ∀C ∈ V, L₀ ≼ C (L₀ is descendant of all compounds)
-- L₀ is reachable from every vertex via directed truncation edges
+**Primary Method** - Earliest significant peak in early region:
 
-**Topological Role**:
+1. **Early window**: Define early chromatogram region (configurable fraction of total time range)
+2. **Significant peaks**: Find statistically significant peaks in early window
+3. **Select earliest**: L₀_peak = argmin(peak.time) for peaks in early window
 
-- Bottom element in partial order (poset)
-- Anchor point for bottom-up DAG traversal (topological sort starts here)
-- First compound processed in constraint propagation algorithm
+**Rationale**: Earliest peak = most hydrophilic = most likely pure DNA tag. Later peaks likely short truncation products.
 
-**Proof of Universal Descendant**:
-For any compound C = [B₁, B₂, ..., Bₙ] where some Bᵢ ≠ Null:
+**Fallback**: If no peak detected, L₀_position = t_min (signal start).
 
-- Truncate each Bᵢ → Null sequentially
-- After n truncations: [Null, Null, ..., Null] = L₀
-- Therefore C ≻ L₀ (C is ancestor of L₀)
-- By definition of descendant: L₀ ≼ C
-- QED
+#### 2.4.4 Quality Control
 
-#### 2.4.3 Retention Time Ordering Principle
+**Warning Thresholds**:
 
-**Hydrophobicity Additivity**:
-
-- DNA tag + linker has base hydrophobicity H₀
-- Each building block adds hydrophobicity: H(C) = H₀ + Σ(H_building_block)
-- Longer peptides → higher total hydrophobicity → longer retention
-
-**Early Elution Hypothesis**:
-
-- DNA backbone is polar/hydrophilic (phosphate groups, sugar-phosphate backbone)
-- Linker chemistry typically hydrophilic or moderately hydrophobic
-- Most peptide building blocks increase hydrophobicity
-- **Expected**: t(L₀) ≤ t(compounds with peptides)
-
-**Chemical Rationale**:
-
-- L₀ = tag only → relatively hydrophilic
-- Compounds with amino acids → additional hydrophobic character
-- Result: L₀ should elute in early region of chromatogram
-
-**Exceptions** (rare):
-
-- Highly charged peptides (multiple Arg, Lys, Asp, Glu)
-- Extremely hydrophilic building blocks
-- Modified tags with high hydrophobicity
-- These may violate t(L₀) < t(compound) ordering
-
-#### 2.4.4 L₀ Peak Detection Algorithm
-
-**Primary Method: Earliest Significant Peak in Early Region**
-
-**Step 1: Define Early Elution Window**
-
-Compute early region boundary:
-t_early_max = t_min + 0.2 × (t_max - t_min)
-
-This defines the first 20% of chromatogram as "early region" where L₀ is expected.
-
-**Step 2: Detect Significant Peaks**
-
-Find all statistically significant peaks in early window:
-early_peaks = {peaks with Z > 3 where t ∈ [t_min, t_early_max]}
-
-Poisson Z-score threshold ensures we only consider real peaks, not noise.
-
-**Step 3: Select Earliest Peak**
-
-Choose L₀ peak by minimum retention time:
-L₀_peak = argmin(peak.time) for peak in early_peaks
-
-**Rationale for "Earliest" Selection**:
-
-- Earlier peak = more hydrophilic → more likely pure DNA tag
-- Later peaks in early region could be very short peptides (e.g., single amino acid)
-- Conservative choice: Ensures NULL reference is truly the minimal compound
-- Chemically justified: DNA tag should elute before any peptide-containing compounds
-
-**Multiple Peak Handling**:
-
-- If multiple significant peaks detected in early region
-- Select the one with **minimum retention time** (earliest elution)
-- Later peaks likely represent short truncation products (L₁, L₂), not pure tag (L₀)
-- Example: Peak at 10.2 min and peak at 12.5 min → Choose 10.2 min as L₀
-
-**Fallback Method: Signal Start**
-
-If no detectable peak in early region (no peaks pass Z > 3 threshold):
-L₀_position = t_min (signal start time)
-L₀_intensity = signal(t_min)
-
-**Rationale**:
-
-- Conservative: t_min is earliest possible position
-- Safe NULL reference (any peak after start is valid)
-- Enables analysis to proceed even with poor L₀ signal quality
-- Worst case: NULL position = 0, all other peaks treated as non-NULL
-
-#### 2.4.5 Quality Control and Validation
-
-**Late L₀ Detection (Red Flag)**
-
-If L₀_peak.time > t_min + 0.5 × (t_max - t_min):
-Issue WARNING: "L₀ peak detected in late elution region (t = {L₀_peak.time})"
-
-**Likely Causes**:
-
-- Serious contamination (non-peptide impurity with high hydrophobicity)
-- Incorrect dataset (not from expected library, wrong tag sequence)
-- Severe signal distortion or artifact
-- DNA degradation, modification, or tag loss
-- Tag chemistry fundamentally different than expected
-
-**Recommended Action**:
-
-- **STOP automated analysis**
-- Inspect raw chromatogram visually
-- Verify dataset identity (correct library, correct experiment)
-- Investigate signal processing issues
-- Investigate synthesis or purification issues
-- Consider excluding sample from analysis
-
-**Rationale**: Late-eluting L₀ violates fundamental hydrophobicity principle and indicates data quality problems too severe for automated handling.
+- **Late elution**: If L₀_peak elutes unusually late in chromatogram → WARNING (likely data quality issue - STOP automated analysis)
+- **Missing L₀**: If L₀ not in dataset → ERROR (cannot proceed with NULL classification)
+- **Weak signal**: If SNR below detection threshold → WARNING (unreliable background estimation)
+- **Retention inconsistency**: High variation across dataset → WARNING (chromatography instability)
 
 **Validation Checks**:
 
-**Check 1: L₀ Exists**
+1. L₀ exists in dataset
+2. Detectable signal (SNR above threshold)
+3. Early elution (within expected hydrophilic region)
+4. Consistent retention across dataset
 
-- Verify L₀ = [Null, Null, ..., Null] is present in dataset
-- If missing: ERROR - cannot proceed with NULL peak classification
+#### 2.4.5 Role as Universal Reference
 
-**Check 2: Detectable Signal**
+**NULL Peak Classification**: Any compound C may have peak at t(L₀_peak) due to universal truncation constraint (∀C ∈ V, C → L₀ possible).
 
-- Verify L₀ has signal above noise floor (SNR > 2)
-- If below detection: WARNING - background estimation unreliable
+**Background Estimation**: Use L₀ off-peak regions as noise reference:
 
-**Check 3: Early Elution**
+- Primary: background = median(L₀_signal where not in peak region)
+- Alternative: background = median(bottom 10% of all scaled_count values)
 
-- Verify L₀_peak.time < 0.5 × (t_max - t_min)
-- If violated: WARNING - review data quality
+**SNR Reference**: All compounds compute SNR relative to L₀ background.
 
-**Check 4: Retention Consistency**
+**Constraint Propagation**: Bottom-up DAG traversal starts at L₀ (topological minimal element); NULL constraint propagates to all ancestors.
 
-- If multiple L₀ measurements across dataset, verify consistent retention
-- Expected variation: < 5% of median retention time
-- If high variation: WARNING - chromatography instability or tag heterogeneity
+#### 2.4.6 Edge Cases
 
-#### 2.4.6 Role as Universal Reference Point
+**Case 1 - Missing L₀**: ERROR - require L₀ in dataset or skip NULL classification; use alternative background method.
 
-**NULL Peak Definition**
+**Case 2 - Weak/No Signal**: WARNING - fallback position (t_min), alternative background method, reduced validation confidence.
 
-**Definition**: A NULL peak is a peak at retention time t(L₀_peak)
+**Case 3 - Multiple Peaks**: Select earliest peak (most conservative); flag if many peaks detected (data quality issue).
 
-**Universal Constraint**: Any compound C may have a peak at position t(L₀_peak)
-
-- Reason: Any compound can undergo complete truncation (all BBs → Null)
-- Result: Peak at L₀ position represents DNA tag only, no peptide
-- Classification: These peaks are labeled as NULL type
-
-**Used In**:
-
-- Peak classification constraint propagation
-- Distinguishing product from truncation peaks
-- Identifying complete degradation to tag-only
-
-**Background Estimation**
-
-**Primary Method**: Use L₀ chromatogram off-peak regions
-background = median(L₀_signal where not in peak region)
-
-**Rationale**: L₀ has minimal complexity (tag only), so off-peak signal is pure noise
-
-**Alternative Method** (if L₀ unavailable or unreliable):
-background = median(bottom 10% of all scaled_count values across dataset)
-
-**SNR Reference**: All other compounds compute SNR relative to this background:
-SNR(C) = max(product_counts_C) / background
-
-**Retention Anchor**
-
-**Implicit Reference**: All retention times referenced to L₀ as reference point
-
-- L₀ represents "zero peptide" retention
-- Compounds measured by how much later they elute vs L₀
-- Retention order: t(L₀) ≤ t(L₁) ≤ ... ≤ t(Lₙ) (ideally)
-
-**Classification Anchor**
-
-**Bottom-Up Traversal**: DAG constraint propagation starts at L₀
-
-1. Process L₀ first (topological sort minimal element)
-2. Extract L₀ peak position as NULL constraint
-3. Propagate NULL constraint to all ancestors (all other compounds)
-4. Continue processing compounds in topological order
-
-**Foundation**: L₀ provides the base case for recursive peak classification
-
-#### 2.4.7 Edge Cases and Failure Modes
-
-**Case 1: L₀ Not in Dataset**
-
-**Problem**: All-null compound [Null, Null, ..., Null] is missing
-
-**Impact**:
-
-- Cannot establish NULL peak reference
-- Cannot perform NULL peak classification
-- Background estimation compromised
-
-**Resolution**:
-
-- ERROR: Require L₀ compound in dataset
-- User must add L₀ or skip NULL-based classification
-- Fallback: Use alternative background method, omit NULL classification
-
-**Case 2: L₀ Below Detection Limit**
-
-**Problem**: L₀ exists but has no detectable peaks (all signal near noise floor)
-
-**Causes**:
-
-- DNA didn't amplify during PCR
-- Tag loss during chromatography
-- Signal outside collection time window
-- Sequencing depth too low
-
-**Impact**:
-
-- No NULL peak position available
-- Background estimation unreliable
-- SNR calculations less accurate
-
-**Resolution**:
-
-- WARNING: Flag reduced confidence in validation
-- Fallback L₀ position: use t_min (signal start)
-- Use alternative background (low-count tail method)
-- Reduce confidence in synthesis validation results
-
-**Case 3: Multiple Peaks at L₀**
-
-**Problem**: L₀ chromatogram has 2+ significant peaks
-
-**Causes**:
-
-- Tag degradation (partial fragments)
-- Contaminant co-elution
-- Tag sequence variants in library
-- Oligomerization of tags
-
-**Resolution**:
-
-- Select earliest peak as NULL reference (most conservative)
-- Alternative: Select peak with highest Z-score (most significant)
-- Flag ambiguity in QC report
-- If >3 peaks: WARNING - data quality issue
-
-**Case 4: Mode-Dependent Minimality**
-
-**Building-Block Mode**:
-
-- L₀ is unique minimal element
-- All compounds truncate to same L₀
-- NULL peak unambiguous
-
-**Monomer Mode**:
-
-- Multiple minimal elements possible (individual amino acids: Leu, Val, Ala, etc.)
-- Each single amino acid is minimal (cannot truncate further without → L₀)
-- L₀ still exists as separate minimal element (tag only, no AAs)
-
-**Resolution**:
-
-- NULL peak definition still based on physical L₀ compound (tag only)
-- Monomer-level minimal elements (single AAs) are distinct from L₀
-- Classification unaffected (NULL = tag position, regardless of mode)
-
-#### 2.4.8 Theoretical Constraints
-
-**Universal NULL Constraint**
-
-**Formal Statement**: ∀C ∈ V, C may have peak at position(L₀_peak)
-
-**Justification**: Any compound can undergo complete truncation:
-C = [B₁, B₂, ..., Bₙ] → [Null, Null, ..., Null] = L₀
-
-**Used In**: Peak classification as global constraint
-
-- When classifying peaks for compound C
-- A peak at position ≈ t(L₀_peak) → candidate for NULL classification
-- Applies to ALL compounds (universal)
-
-**Retention Ordering Expectation**
-
-**Expected Ordering**: t(C) ≥ t(L₀) for compounds with building blocks
-
-**Physical Basis**: Hydrophobicity additivity (peptides increase retention)
-
-**Validation**:
-
-- Check: Does t(C) ≥ t(L₀) hold for >90% of compounds?
-- If violated frequently: Data quality issue or unusual tag chemistry
-
-**Violations**:
-
-- Highly hydrophilic peptides (charged residues) may elute before L₀
-- Flag as anomalies for review
-- May indicate synthesis error, tag modification, or unusual chemistry
-
-**Completeness Property**
-
-**Definition**: L₀ represents maximal truncation (no building blocks remain)
-
-**Chemical Interpretation**:
-
-- L₀ peak = only DNA tag detected in sequencing
-- No peptide product present
-- Not a synthesis failure (L₀ is the starting material!)
-
-**Implication for Validation**:
-
-- Presence of L₀ peak ≠ synthesis failure
-- L₀ is expected to have dominant peak (it's the "null" reference)
-- Other compounds compared against L₀ as reference
+**Case 4 - Monomer Mode**: Multiple minimal elements (single AAs) distinct from L₀; NULL peak still based on physical L₀ compound.
 
 ---
 
@@ -1322,11 +798,13 @@ From **Graph Theory**:
 - **Block Mode**: Building blocks as atomic units
 
   - 3 building blocks → levels 0-3
-  - Forest structure (separate trees per maximal compound)
+  - DAG with convergence at block granularity
+  - Positional variants with same blocks converge to same equivalence class
 
 - **Monomer Mode**: Individual monomers as atomic units
   - 3 trimeric blocks (9 monomers) → levels 0-9
-  - DAG with convergence (diamonds everywhere)
+  - DAG with convergence at monomer granularity
+  - Positional variants with same monomers converge to same equivalence class
 
 ---
 
@@ -1393,732 +871,136 @@ All three positional variants (members) represent the same chemical peptide: Val
 **Entity**: EquivalenceClass (collection of members)
 **Identifier**: block_support_sequence (the equivalence class identifier)
 
-#### 4.2.2 Pooled Mode: Optional Optimization
+#### 4.2.2 Pooled Mode Overview
 
-**Purpose**: Pooled mode is an **optional performance optimization** that can provide:
+**Purpose**: Optional performance optimization providing significant speedup by processing N equivalence classes instead of multiple positional variants per class.
 
-1. **Computational speedup**: Process N equivalence classes instead of 3N-10N positional variants (~3-10× faster)
-2. **Noise reduction**: Average out positional encoding noise and experimental variability
-3. **Molecular focus**: One result per chemical molecule, not per synthesis path
+**Benefits**: Computational speedup, noise reduction, molecular-level focus.
 
-**Important**: Pooled mode is **NOT required** - individual mode (analyzing each positional variant separately) is fully valid and remains the default approach.
+**Important**: Individual mode is fully valid; pooled mode is optional.
 
-**When to Consider Pooled Mode**:
+**Use Pooled Mode When**: Large datasets, similar variant behavior, molecular-level analysis.
 
-- ✅ Large datasets (many positional variants)
-- ✅ Variants have similar chromatographic behavior
-- ✅ Molecular-level analysis (focus on chemistry, not synthesis path)
-- ✅ Exploratory analysis (overview of library)
+**Use Individual Mode When**: Position-specific diagnostics, synthesis troubleshooting, small datasets, dissimilar variants, regulatory requirements.
 
-**When to Use Individual Mode** (default):
-
-- ✅ Position-specific diagnostics needed
-- ✅ Synthesis troubleshooting (identify problematic positions)
-- ✅ Small datasets (speedup not critical)
-- ✅ Variants have different behavior (pooling invalid)
-- ✅ Regulatory/validation requirements (need actual measurements)
-
-**Performance Impact**:
-
-Individual mode:
-
-```
-N_variants compounds to process (e.g., 3³ = 27 for 3-position library)
-Each processed independently through full pipeline
-```
-
-Pooled mode:
-
-```
-N_classes equivalence classes (e.g., 7 unique block support sequences)
-Peak detection on pooled signal (once per class)
-Area integration on variants (per variant, but cheap)
-
-Speedup ≈ N_variants / N_classes (typically 3-10×)
-```
-
-**Recommendation**: Start with individual mode (simpler, always valid); adopt pooled mode if speedup needed and variants validated as similar.
-
-**Implementation**:
-- Use Case: `ProcessPooledChromatogramsUseCase`
-- File: `src/lcseq/application/use_cases/process_pooled_chromatograms.py`
-- Services: `SignalAggregator`, `PoolingValidator`, `EquivalenceClassBuilder`
-- Tests: `tests/application/use_cases/test_process_pooled_chromatograms.py`
+**Recommendation**: Start with individual mode; adopt pooled mode if speedup needed and variants validated as similar.
 
 #### 4.2.3 Hybrid Pooled Strategy
 
-**Key Insight**: Peak detection is expensive, area integration is cheap. Do expensive operations once (on pooled signal), cheap operations per variant (on individuals).
+**Key Insight**: Peak detection is expensive; area integration is cheap. Detect peaks once on pooled signal, integrate areas per variant.
 
-**Hybrid Approach**:
+**Three-Phase Workflow**:
 
-**Phase 1: Peak Detection on Pooled Signal** (expensive, do once)
+1. **Peak Detection** (expensive, once per class): Aggregate signals → detect peaks on pooled signal
+2. **Area Integration** (cheap, per variant): Use pooled peak boundaries on individual signals → compute purity per variant
+3. **Aggregate Statistics** (reporting): mean_purity, std_purity, class-level validation status
 
-```
-For each equivalence class:
-  1. Aggregate variant signals → pooled_signal
-  2. Peak detection (Discrete Morse + Poisson + Prominence) on pooled signal
-  3. Peak classification (DAG constraints) on pooled signal
-
-Output: Pooled peak positions and boundaries for the equivalence class
-```
-
-**Phase 2: Area Integration on Individual Variants** (cheap, do per-variant)
-
-```
-For each variant in equivalence class:
-  1. Use pooled peak boundaries (from Phase 1)
-  2. Integrate areas in variant's own signal (not pooled signal!)
-  3. Compute purity for this variant
-  4. Validate this variant independently
-
-Output: Individual purities and validation categories
-```
-
-**Phase 3: Aggregate Statistics** (summary for reporting)
-
-```
-For equivalence class:
-  mean_purity = mean(variant_purities)
-  std_purity = std(variant_purities)
-  min_purity = min(variant_purities)
-
-Class-level validation:
-  If all variants VALIDATED → Class: VALIDATED
-  If any variant FAILED → Class: FAILED (flag problematic position)
-  If mixed results → Class: UNCERTAIN (heterogeneous quality)
-```
-
-**Why This Works**:
-
-- Speedup: Peak detection done once (most expensive step)
-- Validity: Purity computed from real signals (not averaged)
-- Information: Position-specific results available for diagnostics
-- Summary: Molecular-level overview for reporting
-
-**What This Avoids**:
-
-- ❌ Averaging purities (loses position-specific info)
-- ❌ Processing every variant through expensive peak detection
-- ❌ Mixing pooled and individual purities in dataset (comparability issues)
+**Result**: Speedup from shared peak detection + individual purities from real signals + position-specific diagnostics available.
 
 #### 4.2.4 Pooled Signal Aggregation
 
-**Prerequisite**: Signal alignment (Part 2.3) - all variants on common time grid
+**Algorithm**:
 
-**Aggregation Algorithm**:
+1. **Align**: Interpolate variants to common time grid (see Part 2.3)
+2. **Aggregate**: pooled_signal(t) = mean(v₁(t), v₂(t), ..., vₙ(t)) [or median if outliers present]
+3. **Validate**: Compute pairwise correlations; check min(corr) exceeds similarity threshold
 
-**Step 1: Align Variants to Common Grid**
+**Validity Check** (essential): If minimum correlation below threshold → variants differ → fall back to individual mode.
 
-```
-For equivalence class with variants V = {v₁, v₂, ..., vₙ}:
-
-Find global time window (Part 2.3):
-  t_min = min(vᵢ.t_min for all i)
-  t_max = max(vᵢ.t_max for all i)
-
-Interpolate each variant to common grid:
-  For each vᵢ:
-    vᵢ_aligned = interpolate(vᵢ.signal, t_grid)
-```
-
-**Step 2: Compute Pooled Signal**
-
-```
-Aggregation method (recommend mean):
-  pooled_signal(t) = mean(v₁_aligned(t), v₂_aligned(t), ..., vₙ_aligned(t))
-
-Alternative (robust to outliers):
-  pooled_signal(t) = median(v₁_aligned(t), v₂_aligned(t), ..., vₙ_aligned(t))
-
-Recommendation: Mean (smoother, faster, standard)
-```
-
-**Step 3: Validity Check** (essential!)
-
-```
-Compute pairwise correlations between variant signals:
-  For all pairs (vᵢ, vⱼ):
-    corr(vᵢ, vⱼ) = correlation(vᵢ_aligned, vⱼ_aligned)
-
-Check: min(all correlations) > threshold (e.g., 0.8)
-
-If correlation too low:
-  → Variants have different chromatographic behavior
-  → Pooling aggregation invalid
-  → Fall back to individual mode
-  → Report: "Positional variants differ - individual analysis required"
-```
-
-**Validity Assumption**: Positional variants have similar chromatographic behavior (peaks at similar positions, similar shapes, similar intensities).
-
-**Why Correlation Check Matters**:
-
-- If variant 1 has peak at t=20, variant 2 at t=25 → averaging creates artificial broad "peak"
-- If variant 1 clean, variant 2 very noisy → averaging doesn't represent either
-- Low correlation = pooling invalid = must use individual mode
-
-**Recommended Threshold**: correlation > 0.8 (strong similarity required)
+**Threshold**: High correlation required for valid pooling (strong similarity assumption).
 
 #### 4.2.5 Peak Detection on Pooled Signal
 
-**Apply full detection pipeline to pooled signal**:
+Apply full detection pipeline (Discrete Morse + Poisson + Prominence, see Part 5.1-5.2) to pooled signal using same parameters as individual mode.
 
-**CRITICAL**: Pooled mode does NOT change processing parameters. The same uniform parameters (scale ranges) apply to both pooled signals and individual variant signals to ensure comparability.
+**Output**: Peak positions, boundaries [t_start, t_end], and classifications (NULL, TRUNCATION, PUTATIVE_PRODUCT, UNKNOWN) for equivalence class.
 
-**Step 1: Peak Detection**
+**These boundaries used for ALL variants in next step.**
 
-```
-peaks = detect_peaks(pooled_signal)
-(Same parameters as individual mode - Part 5.1-5.2)
-```
-
-**Step 2: Peak Detection**
-
-```
-Discrete Morse theory (Part 5.1) + Poisson statistics (Part 5.2)
-→ Detect significant peaks in pooled signal
-Output: Peak positions, boundaries, prominence, Z-scores
-```
-
-**Step 3: Peak Classification**
-
-```
-DAG constraint propagation (Part 5.3-5.4)
-→ Classify peaks: NULL, TRUNCATION, PUTATIVE_PRODUCT, UNKNOWN
-Output: Peak labels for pooled signal
-```
-
-**Output**: Pooled peak information for the equivalence class
-
-- Peak positions (retention times)
-- Peak boundaries [t_start, t_end] for each peak
-- Peak classifications
-
-**These boundaries will be used for ALL variants in the next step.**
-
-**Rationale**:
-
-- Peak positions should be similar across variants (if correlation valid)
-- Pooled signal has better SNR (noise averaged out)
-- Detecting once is much faster than detecting N times
+**Rationale**: Pooled signal has better SNR (noise averaged); detecting once faster than N detections.
 
 #### 4.2.6 Area Integration on Individual Variants
 
-**Use pooled peak boundaries, but integrate on individual variant signals** (NOT consensus).
+**Critical**: Use pooled peak boundaries, but integrate on each variant's OWN signal (not pooled signal).
 
 **Algorithm**:
 
 ```
-For each variant vᵢ in equivalence class:
-
-  Input:
-    - vᵢ_signal_raw (variant's raw signal)
-    - peak_boundaries from pooled signal (Phase 1)
-
-  Step 1: Use raw variant signal directly
-    vᵢ_signal = vᵢ_signal_raw
-
-  Step 2: Integrate areas using pooled boundaries
-    For each peak with boundaries [t_start, t_end]:
-      Area_peak_vᵢ = Σ vᵢ_signal(t) for t ∈ [t_start, t_end]
-
-  Step 3: Compute purity for variant vᵢ
-    Purity(vᵢ) = Area(product_vᵢ) / [Area(product_vᵢ) + Area(truncations_vᵢ) + Area(unknowns_vᵢ) + Area(null_vᵢ)]
-
-  Step 4: Validate variant vᵢ (Part 6)
-    Compare Purity(vᵢ) to dataset percentiles
-    → Validation category: VALIDATED, LIKELY_SUCCESS, UNCERTAIN, LIKELY_FAILURE, FAILED
-
-  Step 5: Store individual results
-    Store: Individual purity and validation for this variant
+For each variant vᵢ:
+  1. Use vᵢ's raw signal
+  2. Integrate areas using pooled boundaries [t_start, t_end]
+  3. Compute Purity(vᵢ) from vᵢ's integrated areas
+  4. Validate vᵢ individually (see Part 6)
+  5. Store individual purity and validation status
 ```
 
-**Critical**: Each variant's purity computed from its OWN signal, not from pooled signal.
-
-**Why This Approach**:
-
-- ✅ Purity is real measurement (from actual variant signal)
-- ✅ Position-specific information preserved
-- ✅ Can identify problematic synthesis paths
-- ✅ Valid for cross-compound comparison (all measured consistently)
-- ✅ Cheap operation (simple integration, no expensive peak detection)
-
-**What This Avoids**:
-
-- ❌ Averaging purities (loses position-specific info)
-- ❌ Purity from pooled signal (not a real measurement)
-- ❌ Mixing pooled and individual purities (comparability issues)
+**Result**: Real measurements from actual signals + position-specific information preserved + cheap operation.
 
 #### 4.2.7 Aggregate Statistics and Reporting
 
-**Class-Level Summary**:
+Compute class-level statistics: mean_purity, std_purity, min/max_purity.
 
-From individual variant purities, compute aggregate statistics:
+**Validation Summary**: If all variants VALIDATED → Class VALIDATED; if any FAILED → Class FAILED; if mixed → HETEROGENEOUS.
 
-```
-For equivalence class with variants {v₁, v₂, ..., vₙ}:
+**Two Reporting Levels**:
 
-Purity statistics:
-  mean_purity = mean(Purity(v₁), Purity(v₂), ..., Purity(vₙ))
-  std_purity = std(Purity(v₁), Purity(v₂), ..., Purity(vₙ))
-  min_purity = min(Purity(v₁), Purity(v₂), ..., Purity(vₙ))
-  max_purity = max(Purity(v₁), Purity(v₂), ..., Purity(vₙ))
+- **Molecular**: Mean purity ± std, validation status (high-level screening)
+- **Position-specific**: Per-variant purity and status (synthesis troubleshooting)
 
-Validation summary:
-  If all variants: VALIDATED → Class: VALIDATED
-  If all variants: FAILED → Class: FAILED
-  If any variant: FAILED → Class: FAILED (flag specific variant)
-  If mixed results → Class: UNCERTAIN or HETEROGENEOUS
-```
+#### 4.2.8 Validity Requirements and Fallback
 
-**Reporting**:
-
-**Molecular-level report** (high-level overview):
-
-```
-EquivalenceClass "Val":
-  Mean purity: 0.83 ± 0.15 (std)
-  Range: [0.65, 0.95]
-  Validation: HETEROGENEOUS (mixed results)
-```
-
-**Position-specific report** (diagnostic detail):
-
-```
-EquivalenceClass "Val":
-  [Val, Null, Null] (position 1): Purity 0.90, VALIDATED
-  [Null, Val, Null] (position 2): Purity 0.65, UNCERTAIN ← FLAG
-  [Null, Null, Val] (position 3): Purity 0.95, VALIDATED
-
-Interpretation: Val synthesis good at positions 1&3, problematic at position 2
-```
-
-**Use Case**:
-
-- Molecular report for high-level screening
-- Position report for synthesis troubleshooting
-- Both available from hybrid approach
-
-#### 4.2.8 Validity Requirements
-
-**Pooled mode is valid ONLY IF positional variants have similar chromatographic behavior.**
+**Pooled mode valid ONLY IF variants have similar chromatographic behavior.**
 
 **Validity Checks**:
 
-**Check 1: Signal Correlation**
+1. **Signal Correlation**: min(pairwise correlations) exceeds threshold; if fails → fall back to individual mode
+2. **Peak Position Consistency** (optional): Δt within acceptable retention precision window
+3. **Purity Variance** (diagnostic): High std_purity → flag as heterogeneous
 
-```
-For each equivalence class:
-  Compute pairwise correlations between aligned variant signals
+**Assumption**: Same molecule → same retention (position-independent chromatography).
 
-  correlation_threshold = 0.8
+**Fails When**: Positional folding effects, incomplete deprotection, tag-peptide interactions.
 
-  If min(correlations) < correlation_threshold:
-    → Variants too different
-    → Pooling invalid
-    → Fall back to individual mode
-    → Flag: "Position-dependent chromatography detected"
-```
-
-**Check 2: Peak Position Consistency**
-
-```
-If using individual mode first (to validate):
-  Detect peaks in each variant independently
-  Check: Are peak positions similar across variants?
-
-  For each peak type (product, truncations):
-    Δt = max(variant_positions) - min(variant_positions)
-
-    If Δt > retention_precision × 3:
-      → Peak positions vary significantly
-      → Pooled signal may merge/blur peaks
-      → Consider individual mode
-```
-
-**Check 3: Purity Variance**
-
-```
-After computing individual purities:
-  std_purity = std(variant_purities)
-
-  If std_purity > 0.2:
-    → High variance between variants
-    → Positions have different synthesis quality
-    → Report heterogeneous class
-    → Flag for investigation
-```
-
-**Assumption**: Chromatographic behavior independent of synthesis position
-
-**Physical Basis**: Same molecule, same retention (hydrophobicity determined by sequence, not synthesis path)
-
-**When Assumption Fails**:
-
-- Positional effects on folding/conformation
-- Incomplete deprotection (position-dependent)
-- Tag-peptide interactions vary by position
-- In these cases: Individual mode mandatory
-
-#### 4.2.8.1 Operational Fallback Workflow
-
-**What Happens When Validation Fails**:
-
-**During Processing** (automated):
-
-```
-For each equivalence class:
-
-  Step 1: Attempt pooled mode
-    1a. Aggregate signals → pooled signal
-    1b. Run correlation check (Check 1)
-
-    If min(correlation) < 0.8:
-      → Log warning: "EquivalenceClass [sequence] failed correlation check"
-      → Automatically fall back to individual mode
-      → Flag class as "POOLING_INVALID" in metadata
-      → Proceed with Step 2
-
-  Step 2: Individual mode processing
-    For each variant in class:
-      - Peak detection (on raw signals)
-      - Classification
-      - Purity calculation
-      - Validation
-
-  Step 3: Aggregate individual results
-    - Compute mean_purity, std_purity
-    - Run Check 2 (peak position variance)
-    - Run Check 3 (purity variance)
-    - Assign class-level status
-```
-
-**Class-Level Status**:
-
-```
-If pooled mode succeeded:
-  status = "POOLING_VALID"
-
-If fell back to individual mode:
-  If Check 2 or Check 3 failed:
-    status = "HETEROGENEOUS" (variants have different behavior)
-  Else:
-    status = "POOLING_INVALID_BUT_SIMILAR" (low correlation but stable)
-```
-
-**Output Flags**:
-
-```python
-class_metadata = {
-    "pooling_attempted": True,
-    "pooling_valid": False,  # Fell back
-    "correlation_min": 0.67,  # Below threshold
-    "fallback_reason": "Low signal correlation between positional variants",
-    "mode_used": "individual",
-    "heterogeneous": False,  # Checks 2&3 passed
-    "recommendation": "Review positional variants - may have position-specific effects"
-}
-```
-
-**User Reporting**:
-
-In summary output:
-```
-EquivalenceClass: Val (3 variants)
-  Mode: Individual (pooling invalid - correlation 0.67 < 0.8)
-  Mean purity: 0.85 ± 0.08
-  Recommendation: Review variants - possible position-dependent effects
-```
-
-**Key Principle**: Fallback is automatic and transparent. User sees which classes used pooled vs individual mode and why.
+**Automatic Fallback**: If correlation below threshold, automatically use individual mode and flag class with reason.
 
 #### 4.2.9 Individual vs Pooled Mode Comparison
 
-**Individual Mode** (default, always valid):
+**Individual Mode**: Full pipeline per variant. **Pros**: Always valid, simpler, full position info. **Cons**: Slower, more results, lower SNR.
 
-**Approach**: Analyze each positional variant independently
+**Pooled Mode** (optional): Detect peaks once on pooled signal, integrate per variant. **Pros**: Significant speedup, noise reduction, molecular summaries. **Cons**: Requires high similarity, more complex.
 
-```
-For each of N_variants:
-  1. Peak detection (Discrete Morse + Poisson + Prominence)
-  2. Peak classification (DAG constraints)
-  4. Area integration
-  5. Purity calculation
-  6. Validation
+**Recommendation**: Start with individual mode. Consider pooled if large dataset, speedup needed, variants highly similar.
 
-Output: N_variants individual results
-```
+#### 4.2.10 PooledCompound: Delegation Proxy
 
-**Advantages**:
-✅ Always valid (no assumptions about variant similarity)
-✅ Full position-specific information
-✅ No validity checks required
-✅ Simpler workflow
-✅ Regulatory-compliant (actual measurements)
+**Pattern**: Immutable proxy delegating most attributes to real compound, overriding chromatogram with pooled signal.
 
-**Disadvantages**:
-❌ Slower (process each variant through expensive pipeline)
-❌ More results to review (N_variants instead of N_classes)
-❌ Noise not averaged (lower SNR per variant)
+**Key Methods**: `__getattr__` delegates properties, `__eq__/__hash__` use real compound for hierarchy compatibility.
 
-**When to use**: Default choice, synthesis diagnostics, regulatory requirements
+**Usage**: Create PooledCompound(real_compound, pooled_chromatogram) → process through pipeline → transfer detected_peaks/selected_peak to all variants.
 
----
+**Properties**: Temporary (not stored), immutable (preserves original data), transparent (duck typing).
 
-**Pooled Mode** (optional optimization, hybrid approach):
+**Implementation**: `src/lcseq/domain/entities/pooled_compound.py`
 
-**Approach**: Detect peaks on pooled signal, quantify on individuals
+#### 4.2.11 Quotient Hierarchy: Edge Projection
 
-```
-For each of N_classes equivalence classes:
-  1. Aggregate variants → pooled signal (cheap)
-  2. Peak detection on pooled signal (expensive, done once)
-  3. Peak classification on pooled signal
-  5. For each variant:
-     - Area integration (cheap, per-variant)
-     - Purity calculation (per-variant)
-     - Validation (per-variant)
+**Problem**: Need hierarchy where nodes are equivalence classes, not individual compounds.
 
-Output: N_variants individual results + N_classes summaries
-```
-
-**Advantages**:
-✅ Faster (~3-10× speedup for peak detection)
-✅ Noise reduction (pooled signal has higher SNR)
-✅ Molecular-level summaries (mean_purity, class validation)
-✅ Still get individual purities (validity maintained)
-✅ Position-specific diagnostics available
-
-**Disadvantages**:
-❌ Requires variant similarity (correlation check)
-❌ More complex workflow
-❌ Additional validation steps required
-❌ Pooled peak boundaries may not be optimal for all variants
-
-**When to use**: Large datasets, similar variants, molecular-level analysis, speedup needed
-
----
-
-**Recommendation**:
-
-**Start with Individual Mode**: Simpler, always valid, complete information
-
-**Consider Pooled Mode** if:
-
-1. Dataset is large (many positional variants)
-2. Speedup is needed (peak detection bottleneck)
-3. Variants validated as similar (correlation > 0.8)
-4. Molecular focus appropriate (chemical identity over synthesis path)
-
-**Best Practice**: Run correlation check on sample of classes before committing to pooled mode for full dataset
-
-#### 4.2.10 PooledCompound: Pooled Signal Processing Proxy
-
-**Purpose**: PooledCompound is an immutable proxy that allows pooled chromatograms to be processed through the standard pipeline without mutating the original compound data.
-
-**Design Pattern**: Delegation Proxy with Restricted Mutation
-
-**Key Insight**: We want to process pooled signals (synthetic aggregates) through the same pipeline as real compounds, but we need to preserve the original compound data for downstream analysis.
-
-**Implementation**:
-
-```python
-class PooledCompound:
-    """
-    Proxy that delegates most attributes to a real compound
-    but overrides chromatogram with pooled signal.
-    """
-
-    __slots__ = ('_real', '_pooled_chromatogram', 'detected_peaks', 'selected_peak')
-
-    @property
-    def chromatogram(self):
-        # Override: Return pooled chromatogram
-        return self._pooled_chromatogram
-
-    def __getattr__(self, name):
-        # Delegate all other attributes to real compound
-        return getattr(self._real, name)
-
-    def __eq__(self, other):
-        # Hierarchy compatibility: compare by real compound
-        return self._real == other if not isinstance(other, PooledCompound) else self._real == other._real
-
-    def __hash__(self):
-        # Hierarchy compatibility: hash by real compound
-        return hash(self._real)
-```
-
-**Usage in Pooled Mode**:
-
-```
-For each equivalence class with variants {v₁, v₂, ..., vₙ}:
-
-  1. Aggregate signals → pooled_chromatogram
-
-  2. Create PooledCompound:
-     virtual = PooledCompound(
-         real_compound=v₁,  # Use first variant as template
-         pooled_chromatogram=pooled_chromatogram
-     )
-
-  3. Process virtual through pipeline:
-     peaks = detect_peaks(virtual.chromatogram)  # Uses pooled signal!
-     virtual.detected_peaks = peaks
-     descendants = hierarchy.get_descendants(virtual)  # Works via __hash__!
-
-  4. Transfer results to all real variants:
-     for variant in [v₁, v₂, ..., v₁]:
-         variant.detected_peaks = virtual.detected_peaks
-         variant.selected_peak = virtual.selected_peak
-```
-
-**Why This Works**:
-
-✅ **Immutable**: Original compound data never modified
-✅ **Automatic delegation**: `__getattr__` forwards all properties (building_blocks, level, sequences)
-✅ **Restricted mutation**: `__setattr__` only allows setting detected_peaks/selected_peak
-✅ **Hierarchy compatible**: `__eq__` and `__hash__` delegate to real compound for set/dict operations
-✅ **Type safety**: `__slots__` prevents accidental attribute creation
-
-**Safety Features**:
-
-- PooledCompound is a temporary processing artifact (created, used, discarded)
-- Results transferred to real compounds before returning to user
-- No PooledCompounds appear in final output
-- Pipeline code doesn't need to know about PooledCompound (duck typing)
-
-**Distinction from Representative**:
-
-❌ **NOT a representative**: Virtual compound is a synthetic aggregate of ALL members
-❌ **NOT selected**: No single member is chosen to represent the class
-✅ **Aggregate**: Pooled signal = mean/median of all variants
-✅ **Temporary**: Used only during processing, not stored
-
-**References**: `src/lcseq/domain/entities/pooled_compound.py`
-
-
-**Implementation**:
-- Class: `PooledCompound`
-- File: `src/lcseq/domain/entities/pooled_compound.py`
-- Pattern: Delegation Proxy (GoF Design Patterns)
-- Tests: `tests/domain/entities/test_pooled_compound.py`
-
-#### 4.2.11 Quotient Hierarchy: Edge Projection Algorithm
-
-**Problem**: When grouping positional variants into equivalence classes, we need a new hierarchy where nodes are equivalence classes (not individual compounds).
-
-**Challenge**: PooledCompounds only know about one real compound (their template), but the hierarchy needs to reflect relationships between equivalence classes, not individual variants.
-
-**Solution**: Project edges from the original hierarchy onto equivalence classes using set-based edge projection.
+**Solution**: Project edges from original hierarchy onto equivalence classes using direct descendants only.
 
 **Algorithm**:
 
-```
-Input:
-  - Original hierarchy H with compounds as nodes
-  - Equivalence classes E = {C₁, C₂, ..., Cₖ}
-  - Pooled compounds {vc₁, vc₂, ..., vcₖ} (one per class)
+1. Create mappings: block_support → pooled_compound, compound → block_support
+2. For each edge (ancestor, descendant) in original hierarchy, project to (ancestor_class, descendant_class)
+3. Deduplicate edges (same edge may arise from multiple variants)
+4. Skip self-loops (variants in same class)
 
-Step 1: Create empty quotient hierarchy
-  quotient_hierarchy = CompoundHierarchy(mode=H.mode)
+**Result**: Quotient poset where nodes are equivalence classes, edges are truncation relationships.
 
-  Add all pooled compounds as nodes:
-  for vc in pooled_compounds:
-      quotient_hierarchy.add_compound(vc)
+**Why**: Preserves all relationships from all variants; mathematically correct quotient structure.
 
-Step 2: Build mappings
-  # Map: block support sequence → pooled compound
-  block_support_to_pooled = {
-      Cᵢ.block_support_sequence: vcᵢ
-      for Cᵢ, vcᵢ in zip(equivalence_classes, pooled_compounds)
-  }
-
-  # Map: original compound → block support sequence
-  compound_to_block_support = {
-      variant: C.block_support_sequence
-      for C in equivalence_classes
-      for variant in C.members
-  }
-
-Step 3: Project edges (CRITICAL: use direct descendants only!)
-  edges_added = set()
-
-  for compound in H.compounds:
-      if compound not in compound_to_block_support:
-          continue
-
-      ancestor_block_support = compound_to_block_support[compound]
-      ancestor_pooled = block_support_to_pooled[ancestor_block_support]
-
-      # Get DIRECT descendants (not transitive closure!)
-      direct_descendants = H.get_direct_descendants(compound)
-
-      for desc in direct_descendants:
-          if desc not in compound_to_block_support:
-              continue
-
-          desc_block_support = compound_to_block_support[desc]
-          desc_pooled = block_support_to_pooled[desc_block_support]
-
-          # Add edge if not already added and not same equivalence class
-          edge = (ancestor_pooled, desc_pooled)
-          if edge not in edges_added and ancestor_block_support != desc_block_support:
-              quotient_hierarchy.add_edge(ancestor_pooled, desc_pooled)
-              edges_added.add(edge)
-
-Output: quotient_hierarchy with equivalence class relationships
-```
-
-**Key Principles**:
-
-1. **Use direct descendants only**: Prevents creating transitive edges (preserves DAG structure)
-2. **Deduplicate edges**: Same edge may be inferred from multiple variants
-3. **Skip self-loops**: Variants in same class don't create edges
-4. **Preserve DAG**: Result is a quotient structure (same mode as original)
-
-**Example**:
-
-```
-Original hierarchy (individual compounds):
-  [Val, Leu, Null] → [Val, Null, Null]
-  [Null, Val, Leu] → [Null, Val, Null]  (different synthesis paths)
-  [Null, Leu, Val] → [Null, Null, Val]
-
-Equivalence classes:
-  C₁: "Val-Leu" = {[Val, Leu, Null], [Null, Val, Leu], [Null, Leu, Val]}
-  C₂: "Val" = {[Val, Null, Null], [Null, Val, Null], [Null, Null, Val]}
-
-Quotient hierarchy (projected):
-  vc₁ (Val-Leu) → vc₂ (Val)
-
-  (Single edge represents 3 underlying paths from different variants)
-```
-
-**Mathematical Interpretation**:
-
-- Original hierarchy: Poset of compounds ordered by truncation
-- Quotient hierarchy: Quotient poset (poset modulo equivalence relation)
-- Edge projection: Induced subposet homomorphism
-- Result: DAG where nodes are equivalence classes, edges are truncation relationships
-
-**Why Not Rebuild From Scratch**:
-
-❌ PooledCompound only knows about one variant (its template)
-❌ Building from PooledCompound.building_blocks loses information about other variants
-✅ Edge projection preserves all relationships from all variants
-✅ Quotient structure is mathematically correct
-
-**References**:
-- `src/lcseq/application/use_cases/process_pooled_chromatograms.py:203-252`
-- Step 3: Build quotient hierarchy by projecting original hierarchy edges
-
-
-**Implementation**:
-- Use Case: `ProcessPooledChromatogramsUseCase._build_quotient_hierarchy()`
-- File: `src/lcseq/application/use_cases/process_pooled_chromatograms.py` (lines 203-252)
-- Algorithm: Edge projection onto equivalence class representatives
-- Tests: `tests/application/use_cases/test_process_pooled_chromatograms.py::test_quotient_hierarchy_construction`
+**Implementation**: `ProcessPooledChromatogramsUseCase._build_quotient_hierarchy()`
 
 ### 4.3 Truncation Hierarchy Structure
 
@@ -2154,7 +1036,7 @@ LC-Seq chromatograms have unique properties derived from the fractionation and D
 
 **Data Type: Discrete Fraction Counts (Pre-Scaled)**
 
-- Library injected onto LC column and separated into **96 discrete fractions** (~30-37 second bins)
+- Library injected onto LC column and separated into discrete fractions
 - Each fraction PCR-amplified and sequenced via NGS
 - Raw signal = **DNA barcode sequencing counts per fraction**
 - **Working signal = scaled counts** (normalized for sequencing depth, UMI deduplication, amplification bias)
@@ -2163,26 +1045,26 @@ LC-Seq chromatograms have unique properties derived from the fractionation and D
 
 **Spatial Resolution**
 
-- **Pre-binned data**: ~96 fractions over ~3000 seconds = 30s/fraction
+- **Pre-binned data**: Discrete fractions over total elution time
 - No sub-fraction resolution (discrete time points)
 - Adjacent fractions independent samples (no interpolation needed)
 - Molecular diffusion already averaged within fraction collection
 
 **Count Statistics**
 
-- Typical experiment: 3 × 10¹³ molecules injected, 5 × 10⁸ total sequencing reads
-- Average: 5.3 × 10⁶ counts per fraction (good representation)
-- Peak maximum: ~250 counts (10× above baseline)
-- Baseline: ~25 counts (background)
+- Large molecular input typically processed through sequencing workflow
+- Scaled counts after normalization for sequencing depth and amplification bias
+- Peak maximum typically multiple times above baseline
+- Baseline represents background level
 - Noise: σ ≈ √c (Poisson property)
 
 **Signal-to-Noise Ratio (SNR)**
 
 - Variable across compounds (high for abundant, low for rare)
-- Abundant compounds: Clear peaks, SNR >10
-- Rare compounds: Noisy signals, SNR <3
-- Detection limit: SNR >3 (statistical significance)
-- Quantitation limit: SNR >10 (reproducible measurement)
+- Abundant compounds: Clear peaks, high SNR
+- Rare compounds: Noisy signals, low SNR
+- Detection limit: Minimum SNR threshold for statistical significance
+- Quantitation limit: Higher SNR threshold for reproducible measurement
 
 ---
 
@@ -2194,7 +1076,7 @@ This section establishes the rigorous mathematical framework for peak detection 
 
 #### Mathematical Setup
 
-An LC-Seq chromatogram is a **discrete sequence** c = {c₁, c₂, ..., c₉₆} where:
+An LC-Seq chromatogram is a **discrete sequence** c = {c₁, c₂, ..., cₙ} where:
 
 - cᵢ = scaled sequencing counts in fraction i
 - Time points tᵢ correspond to fraction midpoints
@@ -2209,25 +1091,18 @@ c[i] > c[i-1]  AND  c[i] ≥ c[i+1]
 ```
 
 **Properties:**
+
 - Well-defined for discrete data (no derivatives needed)
 - Complete: Finds ALL local maxima
 - Mathematically rigorous: Extension of continuous Morse theory to discrete spaces
 - Handles ties consistently (≥ on right allows plateau detection)
 
 **Morse Index (Discrete):**
+
 - Index 1: Local maximum (peak)
 - Index 0: Local minimum (valley)
 
-#### Why Discrete Morse Theory?
-
-Discrete Morse theory is the **natural mathematical language** for LC-Seq:
-
-- **Appropriate**: Discrete data requires discrete mathematics
-- **Complete**: Finds all critical points
-- **No smoothing**: Preserves chromatographic resolution
-- **Rigorous**: Based on discrete topology (Forman 1998)
-
-#### Algorithm
+**Algorithm** (O(n) single pass, no smoothing, exact):
 
 ```
 For each index i in [2, n-1]:
@@ -2235,11 +1110,7 @@ For each index i in [2, n-1]:
         peak[i] = True
 ```
 
-**Advantages:**
-- **Direct**: No numerical derivatives
-- **Fast**: O(n) single pass
-- **Exact**: No approximation or smoothing
-- **Complete**: Guaranteed to find all maxima
+Discrete Morse theory is appropriate for discrete count data - finds all local maxima without derivatives, smoothing, or approximation.
 
 ### 5.2 Statistical Significance Testing for Peak Detection
 
@@ -2253,7 +1124,7 @@ LC-Seq data follows Poisson-like statistics (after scaling):
 
 **Noise model**: σ[i] ≈ √(c[i] + ε) where ε prevents division by zero at low counts
 
-**Background estimation**: μ_bg = percentile(all counts, 10) - captures low-count baseline
+**Background estimation**: μ_bg = low percentile(all counts) - captures low-count baseline
 
 #### Statistical Hypothesis Testing
 
@@ -2263,13 +1134,15 @@ For each detected local maximum at position i:
 **Alternative H₁**: Peak is real signal above background
 
 **Test statistic**:
+
 ```
 Z = (c[i] - μ_bg) / √(μ_bg + ε)
 ```
 
 **Decision rule**:
-- Z > 3: Reject H₀ (detection threshold, p < 0.001)
-- Z > 10: High confidence (quantitation threshold)
+
+- Z exceeds detection threshold: Reject H₀ (statistical significance)
+- Z exceeds quantitation threshold: High confidence for quantitation
 
 #### Prominence (Local Significance)
 
@@ -2286,32 +1159,17 @@ where:
 ```
 
 **Interpretation**:
+
 - High prominence = peak well-separated from neighbors (distinct chemical entity)
 - Low prominence = shoulder or unresolved peak (may be real but overlapping)
 
-#### Why Prominence Instead of Persistence?
+**Prominence vs Persistence**: Persistent homology assumes multiple close peaks = noise, but in LC-Seq they represent distinct synthesis outcomes (product + truncations). Prominence respects valley separation, computes in O(n), and is standard in analytical chemistry.
 
-**Persistent Homology Assumes** (incorrect for LC-Seq):
-- Multiple close peaks = noise/over-segmentation
-- Smoothing reveals "true" structure
-- Broad stable features = significant
-
-**LC-Seq Reality**:
-- Multiple close peaks = multiple chemical entities (product + truncations)
-- Each peak = distinct synthesis outcome
-- Prominence captures chromatographic significance without destroying resolution
-
-**Prominence Properties**:
-- Scale-invariant (no smoothing parameter)
-- Respects valley separation (natural chemistry)
-- Fast to compute (O(n) single pass)
-- Standard in analytical chemistry
-
-#### Adaptive Threshold (No Magic Numbers!)
+#### Adaptive Threshold (No Fixed Values!)
 
 Filter peaks using data-derived prominence threshold:
 
-**Option 1: Percentile-based** - Compute percentile threshold (e.g., 20th percentile retains top 80% most prominent peaks)
+**Option 1: Percentile-based** - Compute percentile threshold from distribution (retains most prominent peaks)
 
 **Option 2: Gap-based** - Sort prominence values in descending order, find largest gap between consecutive values, use the value after the gap as threshold. This identifies natural separation between signal and noise clusters.
 
@@ -2343,7 +1201,7 @@ Starting from t_peak, scan leftward (decreasing time):
       t_start = t_min
       break
 
-threshold_fraction = 0.05 (5% of peak height)
+threshold_fraction = configurable baseline fraction (small value to capture peak base)
 ```
 
 **Step 3: Find Right Boundary (t_end)**
@@ -2374,17 +1232,7 @@ Peak:
   z_score = (height_peak - μ_bg) / √(μ_bg + ε)
 ```
 
-**Rationale**:
-
-- **Valley detection**: Natural separation between adjacent peaks (best case)
-- **Threshold-based**: When peaks overlap or no clear valley (height-based cutoff)
-- **Signal edges**: Boundary case handling (peaks at start/end of signal)
-- **5% threshold**: Conservative (captures full peak including tails)
-
-**Use in Integration**:
-Peak area = Σ corrected_signal(t) for t ∈ [t_start, t_end]
-
-This provides the peak boundaries needed for purity calculation (Part 5.0.7) and pooled mode area integration (Part 4.2.6).
+Boundary detection uses valley separation when available, otherwise height thresholds (small fraction of peak height). Peak area = Σ corrected_signal(t) for t ∈ [t_start, t_end].
 
 ### 5.3 Peak Type Classification
 
@@ -2445,117 +1293,25 @@ For detected peaks at positions [10, 15, 25, 35, 50] with NULL position 10 and a
 
 #### 5.3.1 Truncation Boundary: Retention Time Margin
 
-**Problem**: Peak matching uses tolerance thresholds to account for retention time variability, but this can incorrectly assign late-eluting peaks as truncations when they're actually products.
-
-**Solution**: Introduce a **truncation boundary** - a hard cutoff beyond which peaks cannot be classified as TRUNCATION.
-
-**Definition**:
+To prevent late-eluting peaks from being incorrectly classified as truncations, we define a **truncation boundary** beyond which peaks cannot be TRUNCATION:
 
 ```
-truncation_boundary = max(expected_truncation_positions) + truncation_margin
+truncation_boundary = max(L₀_position, max(descendant_products)) + margin
 
-where:
-  expected_truncation_positions = {L₀_position, descendant_product_positions...}
-  truncation_margin = absolute time margin (default: 60 seconds)
+where margin accommodates retention time variability
 ```
 
-**Purpose**:
+**Algorithm**: (1) Compute boundary, (2) Validate TRUNCATION assignments (peak.position ≤ boundary), (3) Identify PRODUCT candidates (unassigned peaks with position > boundary), (4) Select first candidate as PUTATIVE_PRODUCT.
 
-1. **Validate TRUNCATION assignments**: Peaks assigned as TRUNCATION by the Hungarian algorithm must elute BEFORE the boundary
-2. **Define PRODUCT candidates**: Peaks must elute AFTER the boundary to be considered for PUTATIVE_PRODUCT classification
-3. **Account for variability**: The margin accommodates retention time shifts between compounds due to:
-   - Matrix effects
-   - Column aging
-   - Temperature fluctuations
-   - Discrete fraction collection timing
-
-**Algorithm**:
-
-```
-Step 1: Compute truncation boundary
-  max_truncation_pos = max(L₀_position, max(descendant_products))
-  truncation_boundary = max_truncation_pos + truncation_margin
-
-Step 2: Validate TRUNCATION assignments
-  For each peak assigned as TRUNCATION:
-    if peak.position > truncation_boundary:
-      → Reclassify as unassigned (cannot be truncation)
-      → Peak too late - likely product or unknown
-
-Step 3: Determine PRODUCT candidates
-  For each unassigned peak:
-    if peak.position > truncation_boundary:
-      → Candidate for PUTATIVE_PRODUCT
-    else:
-      → Mark as UNKNOWN (between truncations, ambiguous)
-
-Step 4: Select PUTATIVE_PRODUCT
-  From candidates, select first by position (earliest elution)
-```
-
-**Why This Matters**:
-
-Without the truncation boundary, the Hungarian algorithm can match late-eluting product peaks to distant expected truncation positions, leading to incorrect classifications:
-
-```
-Example without boundary:
-  Expected: L₀=10, descendant_products=[15, 20]
-  Detected peaks: [11, 18, 85]
-
-  Hungarian algorithm might match:
-    peak@11 → L₀_position (correct)
-    peak@18 → descendant@20 (correct, within tolerance)
-    peak@85 → ???
-
-  BUT if tolerance is loose, it could incorrectly match:
-    peak@85 → descendant@20 (WRONG! Too far away)
-
-With boundary (margin=60):
-  truncation_boundary = max(10, 15, 20) + 60 = 80
-
-  peak@85 > 80 → Cannot be TRUNCATION
-  peak@85 → Reclassified as unassigned → candidate for PRODUCT
-```
-
-**Configuration**:
-
-Default: `truncation_margin = 60.0` seconds (see `src/lcseq/config.py:69`)
-
-**Recommendation**: Adjust margin based on chromatography stability:
-- **Tight tolerance** (30s): Stable LC, minimal retention shift
-- **Standard** (60s): Typical variability, discrete fractionation
-- **Loose** (120s): High variability, poor reproducibility
-
-**Trade-offs**:
-
-- **Too small**: Late-eluting truncations incorrectly classified as PRODUCT
-- **Too large**: Early-eluting products incorrectly classified as TRUNCATION
-- **Sweet spot**: Accommodates variability without over-extending truncation region
-
-**References**:
-- `src/lcseq/config.py:66-69` - Parameter definition
-- `src/lcseq/domain/services/peak_classifier.py:296-356` - Implementation
-- THEORY.md Section 5.5 - Hungarian algorithm and optimal assignment
+**Margin Configuration**: Adjust based on LC stability - tight margin for stable chromatography, loose margin for high variability. Trade-off: too small misclassifies late truncations as products; too large misclassifies early products as truncations.
 
 ### 5.4 Global Classification via Constraint Propagation
 
 **Key Insight**: Peak classification must respect the **entire lineage DAG**, not just individual compounds.
 
-#### Why Global Classification?
-
-**Problem with local classification:**
-
-- Each compound classified independently
-- Ignores relationships between compounds
-- Inconsistent across lineage
-
-**Solution with global classification:**
-
-- Process DAG in topological order
-- Propagate constraints through edges
-- Ensure consistency across lineage
-
 #### Algorithm: Bottom-Up Propagation
+
+Global classification processes the DAG in topological order, propagating constraints through edges to ensure consistency across the entire lineage.
 
 **Step 1**: Find and process L₀ (minimal element) FIRST. Detect NULL peak (global maximum at L₀).
 
@@ -2612,74 +1368,15 @@ The optimal assignment is found using the Hungarian algorithm (linear sum assign
 
 **CRITICAL DISTINCTION: Peak Classification ≠ Synthesis Validation**
 
-#### What Peak Classification CAN Determine
+#### What Classification Can and Cannot Determine
 
-✅ **Positional Consistency**
+**CAN determine**: Positional consistency (peak location vs DAG constraints, ordering), statistical significance (Z-score, prominence), relational constraints (lineage consistency), hypothesis ranking (most likely product candidate).
 
-- Peak location relative to expected elution order
-- Satisfies constraints from DAG structure
-- Matches expected retention time pattern
+**CANNOT determine**: Chemical identity (requires MS/NMR), purity (co-elution possible), synthesis success (peak presence ≠ successful reaction), quantitation (requires calibration).
 
-✅ **Statistical Significance**
+**PUTATIVE_PRODUCT means**: Positionally consistent peak appearing after truncations, statistically significant, satisfies DAG constraints. This is a hypothesis, NOT chemical confirmation. May be mixture, modified product, or contaminant.
 
-- Peak Z-score for Poisson counts (real vs noise)
-- High prominence (not baseline fluctuation)
-- Mathematically well-defined feature
-
-✅ **Relational Constraints**
-
-- Peak ordering within compound (truncation < product < oligomer)
-- Peak relationships across lineage (descendant → ancestor)
-- Hierarchical consistency in DAG
-
-✅ **Hypothesis Ranking**
-
-- Which peak is **most likely** putative product (by position)
-- Confidence scores based on constraint satisfaction
-- Alternative interpretations
-
-#### What Peak Classification CANNOT Determine
-
-❌ **Chemical Identity**
-
-- Is this the intended molecule? (Unknown!)
-- Could be correct product, truncation mixture, modified product, contaminant
-- Requires mass spectrometry, NMR, or other orthogonal methods
-
-❌ **Purity**
-
-- Is this a single compound or mixture? (Unknown!)
-- Co-eluting compounds appear as single peak
-- Requires chromatographic resolution analysis or spectroscopy
-
-❌ **Synthesis Success**
-
-- Did the synthesis reaction work? (Unknown!)
-- Peak presence ≠ successful synthesis
-- Requires chemical validation (MS, NMR, standards)
-
-❌ **Quantitation**
-
-- How much product was made? (Unknown!)
-- Peak area ≠ absolute quantity without calibration
-- Requires quantitative standards and validated methods
-
-#### Putative Product: What It Means
-
-**A peak labeled "PUTATIVE_PRODUCT" indicates:**
-
-✓ Positionally consistent with expected product elution
-✓ Appears after all known truncation positions
-✓ Satisfies hierarchical constraints from DAG
-✓ Statistically significant (Z > 3, high prominence)
-✓ **Hypothesis** that this _might_ be the product
-
-✗ **NOT** confirmed as pure product
-✗ **NOT** validated synthesis success
-✗ **NOT** chemical identity confirmed
-✗ May be mixture, modified product, or contaminant
-
-**Synthesis validation requires additional evidence:**
+**Synthesis validation requires:**
 
 - Mass spectrometry (molecular weight confirmation)
 - NMR spectroscopy (structure confirmation)
@@ -2704,352 +1401,75 @@ The optimal assignment is found using the Hungarian algorithm (linear sum assign
 - **Chemical identity proof**: Requires spectroscopic confirmation
 - **Publication claims**: "Synthesis successful" requires orthogonal proof
 
-### 5.7 Mathematical Algorithm Summary
+### 5.7 Classification Limitations and Unknown Peaks
 
-#### Three-Stage Pipeline
+#### 5.7.1 What Can Be Classified
 
-**Stage 1: Local Detection** (Discrete Morse Theory + Poisson Statistics)
+**NULL** (high confidence): Peak at t(L₀_peak) - DNA tag only, complete truncation.
 
-- Input: Discrete fraction counts {c₁, c₂, ..., c₉₆}
-- Process:
-  1. Find local maxima (discrete Morse theory) - O(n)
-  2. Find peak boundaries (valley detection) - O(n)
-  3. Compute prominence (height above local baseline) - O(n)
-  4. Filter by Poisson significance (Z-score > 3) - O(n)
-  5. Filter by prominence (percentile or gap-based) - O(n log n)
-- Output: All significant peaks (position, prominence, height, boundaries)
+**TRUNCATION** (high confidence): Peaks matching ancestor product or L₀ positions - DAG constraint propagation.
 
-**Stage 2: Global Classification** (Constraint Propagation on DAG)
+**PUTATIVE_PRODUCT** (positional hypothesis): First significant peak after truncations - NOT chemical confirmation, see Part 5.6.
 
-- Input: Detected peaks + Lineage DAG
-- Process:
-  1. Process L₀ → extract NULL position
-  2. Topological sort of DAG (bottom-up)
-  3. For each compound (in order):
-     - Get descendant constraints
-     - Match peaks to expected positions (Hungarian)
-     - Classify: NULL, TRUNCATION, PUTATIVE_PRODUCT, UNKNOWN
-  4. Propagate product positions to ancestors
-- Output: Peak labels for entire lineage
+**Basis**: Retention time, DAG constraints, statistical significance, ordering constraints.
 
-**Stage 3: Validation** (Constraint Satisfaction Check)
+#### 5.7.2 What Cannot Be Classified (UNKNOWN)
 
-- Input: Peak labels + DAG constraints
-- Process:
-  1. Verify ordering constraints (truncation < product, unknown after product)
-  2. Verify cardinality (≤1 putative product per compound)
-  3. Verify downstream constraint (ancestor product > descendant product)
-  4. Verify lineage constraint (descendant product → ancestor truncation)
-- Output: Validated classifications + confidence scores + caveats
+**UNKNOWN peaks** include:
 
-#### Computational Complexity
+- **Late-eluting**: Retention time > t(putative_product)
+- **Unmatched**: Outside tolerance windows, no ancestor constraint satisfaction
+- **Ambiguous**: Multiple hypotheses, insufficient confidence
 
-- **Local maxima detection**: O(n) for signal of length n
-- **Prominence computation**: O(n) single pass
-- **Statistical filtering**: O(n) per peak
-- **Topological sort**: O(V + E) for DAG with V vertices, E edges
-- **Hungarian algorithm**: O(p³) for p peaks per compound
-- **Total pipeline**: O(V × p³) dominated by peak matching (no multi-scale overhead)
+**Fundamental Limitation**: Without orthogonal data (MS, NMR), chemical identity cannot be determined from retention time alone.
 
-#### Parameters (Uniform Across Dataset!)
-
-**CRITICAL**: All parameters must be **uniform across the entire dataset** for comparability.
-
-**No Smoothing Parameters Needed:**
-
-Since LC-Seq data is pre-binned into fractions, no smoothing is applied. Data used as-is.
-
-**Statistical Significance Parameters:**
-
-```
-Poisson significance threshold:
-  Z_threshold = 3.0  (3σ detection, p < 0.001)
-
-Background estimation:
-  μ_bg = percentile(all_counts, 10)  (10th percentile)
-  ε = 1.0  (regularization for low counts)
-```
-
-**Rationale**:
-- ✅ **Standard**: 3σ is universal detection threshold in analytical chemistry
-- ✅ **Data-driven**: Background from actual count distribution
-- ✅ **Conservative**: 10th percentile captures baseline without signal contamination
-
-**Prominence Threshold:**
-
-Adaptive, data-derived approach (no magic numbers):
-
-```
-Option 1: Percentile-based
-  threshold = percentile(all_prominences, 20)
-  (Retains top 80% most prominent peaks)
-
-Option 2: Gap-based
-  threshold = value_after_largest_gap(sorted_prominences)
-  (Identifies natural separation between signal and noise)
-```
-
-**Rationale**:
-- ✅ **Adaptive**: Threshold derived from data distribution
-- ✅ **Relative**: Works across different signal intensities
-- ✅ **No magic numbers**: Data determines cutoff
-
-**Position Tolerance (for classification):**
-
-Adaptive based on peak spacing:
-
-```
-tolerance = median(peak_spacings) / signal_length
-
-where peak_spacings computed from sorted expected positions
-```
-
-**Rationale**:
-- ✅ **Scale-invariant**: Normalized by signal length
-- ✅ **Data-driven**: Based on actual peak separations
-- ✅ **Chemical**: Reflects typical retention time variability
-
-**Key Principle**: Uniformity > per-compound optimization.
-
-### 5.8 Classification Limitations and Unknown Peaks
-
-#### 5.8.1 What Can Be Classified
-
-Peak classification based on chromatographic retention time and DAG constraints can identify:
-
-**NULL Peak** (High Confidence):
-
-- Peak at retention time t(L₀_peak)
-- Definitive identification based on L₀ reference
-- Chemical meaning: DNA tag only, complete truncation
-
-**TRUNCATION Peaks** (High Confidence):
-
-- Peaks matching ancestor product positions
-- Peaks matching L₀ (null) position
-- Confident identification via positional constraints from DAG
-
-**PUTATIVE_PRODUCT Peak** (Positional Hypothesis):
-
-- Peak positionally consistent with expected product elution
-- First significant peak after all known truncation positions
-- **NOT chemical confirmation** - positional hypothesis only
-- See Part 5.6 for scope and limitations
-
-**Basis for Classification**:
-
-- Absolute retention time (scalar values)
-- DAG constraint propagation (ancestor/descendant relationships)
-- Statistical significance (Poisson Z-score, prominence)
-- Ordering constraints (truncation < product)
-
-#### 5.8.2 What Cannot Be Classified (UNKNOWN)
-
-**Peaks labeled UNKNOWN** include:
-
-**Late-Eluting Peaks**:
-
-- Peaks appearing after putative product position
-- Retention time > t(putative_product)
-- Could be multiple distinct species
-
-**Unmatched Peaks**:
-
-- Peaks that don't match any expected position
-- Outside tolerance windows for truncations
-- No ancestor constraint satisfaction
-
-**Ambiguous Assignments**:
-
-- Multiple candidate peaks for same classification
-- Position matches multiple hypotheses
-- Insufficient confidence to assign label
-
-**Fundamental Limitation**: Without orthogonal analytical data (mass spectrometry, NMR, etc.), chemical identity cannot be determined from retention time alone.
-
-#### 5.8.3 Possible Identities of Unknown Peaks
+#### 5.7.3 Possible Identities of Unknown Peaks
 
 **Late-eluting peaks could be**:
 
-**Oligomers** (n-mers):
+- **Oligomers** (n-mers): Higher-order aggregates at integer multiples of monomer retention time
+- **Contaminants**: Synthesis reagents, degradation products, column bleed, carry-over
+- **Modified products**: Incomplete reactions, side reactions, post-synthesis modifications
+- **Artifacts**: Signal distortions, instrumentation issues
 
-- Dimers (2 copies of compound): Expected retention ≈ 2 × t(monomer) - t(L₀)
-- Trimers (3 copies): Expected retention ≈ 3 × t(monomer) - 2 × t(L₀)
-- Higher oligomers: n-mers following hydrophobicity additivity
-- Formation: Aggregation, cross-linking, non-covalent association
+**Cannot distinguish without MS, NMR, or authentic standards.**
 
-**Contaminants**:
+#### 5.7.4 Handling Unknown Peaks
 
-- Synthesis reagents (unreacted building blocks, coupling agents)
-- Degradation products (hydrolysis, oxidation)
-- Column bleed (stationary phase breakdown)
-- Carry-over from previous samples
+**Strategy**: Label all unidentifiable peaks as UNKNOWN (honest acknowledgment of limitations).
 
-**Modified Products**:
+**Purity**: All non-product peaks reduce purity:
+Purity(C) = counts(putative_product) / counts(all_peaks)
 
-- Incomplete reactions (partial deprotection, incomplete coupling)
-- Side reactions (epimerization, racemization, unwanted cyclization)
-- Post-synthesis modifications (oxidation, hydrolysis during storage)
+**Key Point**: Unknown peaks count as impurities regardless of identity - NOT intended product.
 
-**Artifacts**:
+**Reporting**: Flag compounds with high unknown fraction; recommend follow-up analysis if unknowns dominate.
 
-- Signal distortions
-- Ghost peaks from instrumentation
-- Air bubbles or solvent effects
+#### 5.7.5 Oligomer Hypothesis (Not Classification)
 
-**Cannot distinguish without orthogonal data**: Mass spectrometry (molecular weight), NMR (structure), comparison to authentic standards.
+**Evidence for oligomers**: Position at integer multiples of monomer retention time, ladder pattern, intensity decay, family consistency.
 
-#### 5.8.4 Handling Unknown Peaks in Analysis
+**Hypothesis Strength**: Single peak without pattern (weak evidence); ladder pattern (moderate); ladder with decay and family consistency (strong).
 
-**Classification Strategy**:
+**Use**: Flag for MS follow-up, identify aggregation issues, guide optimization. **NOT automated classification** - remains UNKNOWN until MS confirmation.
 
-- Label all unidentifiable peaks as UNKNOWN
-- Honest acknowledgment of analytical limitations
-- No speculation about chemical identity without evidence
+#### 5.7.6 Quality Metrics
 
-**Purity Calculation**:
+**Per-compound**: unknown_fraction = counts(unknown) / counts(all_peaks). Categories: low (clean), moderate (acceptable), high (concern).
 
-All non-product peaks reduce purity, regardless of identity:
+**Dataset**: Flag if median_unknown or high_unknown_rate exceeds threshold (systematic issue).
 
-Purity(C) = Σ(counts_putative_product) / [Σ(counts_putative_product) + Σ(counts_truncation) + Σ(counts_unknown) + Σ(counts_null)]
+#### 5.7.7 When Definitive Identification Possible
 
-**Key Point**: Unknown peaks count as impurities. Whether a late peak is an oligomer, contaminant, or artifact doesn't matter for purity assessment - it's NOT the intended product.
+**MS**: Confirms molecular weight, distinguishes oligomers from contaminants. **NMR**: Confirms structure. **Authentic standards**: Match retention times. **After orthogonal data**: Reclassify UNKNOWN with confident labels.
 
-**Synthesis Validation Impact**:
+#### 5.7.8 Decision Summary
 
-- High UNKNOWN fraction → reduces purity → affects validation category
-- VALIDATED requires purity > P₇₅ (includes all impurities)
-- Unknown peaks weighted equally with truncations in purity calculation
+**Decision Tree**: L₀ position → NULL; ancestor position → TRUNCATION; first peak after truncations → PUTATIVE_PRODUCT; otherwise → UNKNOWN.
 
-**Reporting**:
+**Conservative Principle**: When in doubt, label UNKNOWN.
 
-- Report presence of UNKNOWN peaks
-- Report fraction of total signal from unknowns
-- Flag compounds with high UNKNOWN content (>20% of signal)
-- Recommend follow-up analysis if unknowns dominate
-
-#### 5.8.5 Oligomer Hypothesis Generation (Not Classification)
-
-While oligomers cannot be definitively identified from retention time, we can generate hypotheses for follow-up investigation:
-
-**Pattern-Based Oligomer Hypothesis**:
-
-**Evidence suggesting oligomerization**:
-
-1. **Position matching**: Late peak at retention ≈ 2 × t(product) - t(L₀)
-2. **Ladder pattern**: Multiple peaks at regular intervals (t, 2t, 3t)
-3. **Intensity decay**: Peak heights decrease geometrically (M >> M₂ >> M₃)
-4. **Family consistency**: Same pattern across related compounds
-
-**Hypothesis Strength**:
-
-- Single late peak at ~2× position: WEAK hypothesis (could be coincidence)
-- Ladder pattern (2×, 3×, 4×): MODERATE hypothesis (systematic behavior)
-- Ladder + intensity decay + family-wide: STRONG hypothesis (likely oligomers)
-
-**Use Case**:
-
-- Flag compounds for follow-up MS analysis
-- Identify systematic aggregation issues in library
-- Guide synthesis/purification optimization
-- **NOT for automated classification** (remains UNKNOWN)
-
-**Recommended Workflow**:
-
-1. Classify late peaks as UNKNOWN (conservative)
-2. Generate oligomer hypothesis scores (informative)
-3. Report hypothesis to user
-4. If hypothesis strong → recommend MS confirmation
-5. After MS analysis → update labels with confident identification
-
-#### 5.8.6 Quality Metrics Based on Unknown Peaks
-
-**Per-Compound Metrics**:
-
-Unknown fraction:
-unknown_fraction(C) = Σ(counts_unknown) / Σ(counts_all_peaks)
-
-Categories:
-
-- Low unknown: <5% (clean synthesis)
-- Moderate unknown: 5-20% (acceptable)
-- High unknown: >20% (quality concern)
-
-**Dataset-Wide Metrics**:
-
-Median unknown fraction:
-median_unknown = median(unknown_fraction_i for all compounds)
-
-Compounds with high unknowns:
-high_unknown_rate = count(unknown_fraction > 0.2) / total_compounds
-
-**Quality Flags**:
-
-- If median_unknown > 0.15: WARNING "Dataset has high unknown peak content - review synthesis/purification"
-- If high_unknown_rate > 0.3: WARNING "30% of compounds have high unknown peaks - systematic issue suspected"
-
-**Interpretation**:
-
-- Moderate unknowns: Normal (some aggregation/impurities expected)
-- High unknowns dataset-wide: Synthesis problem, purification issue, or chromatography problem
-
-#### 5.8.7 When Definitive Identification IS Possible
-
-**Mass Spectrometry (MS)**:
-
-- Confirms molecular weight
-- Distinguishes oligomers (2×, 3× mass) from contaminants
-- Identifies modified products (mass shifts)
-- **After MS**: Update UNKNOWN → OLIGOMER_DIMER (confident label)
-
-**NMR Spectroscopy**:
-
-- Confirms chemical structure
-- Identifies side products, impurities
-- Verifies intended product structure
-
-**Authentic Standards**:
-
-- Synthesize reference compounds
-- Match retention times with high precision
-- Confirm peak identity by co-elution
-
-**Orthogonal Chromatography**:
-
-- Different separation mode (ion exchange, size exclusion)
-- Complementary retention mechanism
-- Resolves co-eluting species
-
-**With Orthogonal Data Available**:
-
-- Reclassify UNKNOWN peaks with confident labels
-- Update purity calculations (same formula, more informative labels)
-- Synthesis validation unchanged (impurity is impurity regardless of identity)
-- More actionable for synthesis optimization (know what to fix)
-
-#### 5.8.8 Classification Decision Summary
-
-**Decision Tree**:
-
-Question: Does peak match L₀ position?
-
-- YES → NULL
-
-Question: Does peak match ancestor product or null position?
-
-- YES → TRUNCATION
-
-Question: Is peak first significant peak after truncations?
-
-- YES → PUTATIVE_PRODUCT
-
-Otherwise:
-
-- → UNKNOWN
-
-**Conservative Principle**: When in doubt, label UNKNOWN. Better to acknowledge uncertainty than to speculate without evidence.
-
-**Purity Impact**: All classifications except PUTATIVE_PRODUCT reduce purity (UNKNOWN, TRUNCATION, NULL all count as impurities).
+**Purity Impact**: All non-product peaks (UNKNOWN, TRUNCATION, NULL) count as impurities.
 
 ---
 
@@ -3106,7 +1526,7 @@ Where summation is over all elution fractions.
 **Interpretation:**
 
 - Purity = 1.0 → Only product peak present
-- Purity = 0.5 → Product and impurities equally abundant
+- Purity ≈ 0.5 → Product and impurities comparable
 - Purity → 0 → Dominated by truncations/unknowns
 
 **Statistical Uncertainty:**
@@ -3118,7 +1538,7 @@ SE(purity) = √[purity × (1-purity) / total_scaled_counts]
 CI = purity ± 1.96 × SE(purity)
 
 **Minimum count threshold:**
-total_scaled_counts > 100 for CI width < 0.2
+Sufficient total_scaled_counts required for narrow confidence interval
 
 ### 6.4 Distribution-Based Thresholds
 
@@ -3127,25 +1547,25 @@ For dataset D with compounds C₁, C₂, ..., Cₙ:
 **Step 1: Characterize Dataset**
 
 1. Compute purity(Cᵢ) for all compounds
-2. Extract percentiles: P₁₀, P₂₅, P₅₀, P₇₅, P₉₀, P₉₅
-3. Compute Median Absolute Deviation: MAD = median(|purity - P₅₀|)
+2. Extract percentiles across distribution
+3. Compute Median Absolute Deviation: MAD = median(|purity - median|)
 4. Estimate background from L₀ or low-count tail
 
 **Step 2: Define Adaptive Categories**
 
-- **Exceptional purity**: purity > P₉₀ (top 10%)
-- **High purity**: P₇₅ < purity ≤ P₉₀ (75th-90th percentile)
-- **Moderate purity**: P₅₀ < purity ≤ P₇₅ (50th-75th percentile)
-- **Low purity**: P₂₅ < purity ≤ P₅₀ (25th-50th percentile)
-- **Very low purity**: purity ≤ P₂₅ (bottom 25%)
+- **Exceptional purity**: purity in top percentile tier
+- **High purity**: purity in upper quartile range
+- **Moderate purity**: purity near median
+- **Low purity**: purity in lower quartile range
+- **Very low purity**: purity in bottom percentile tier
 
 **Step 3: Adjust for Dataset Quality**
 
-If MAD(purity) < 0.1: # High-quality library
-→ Use strict thresholds (P₇₅ for validation)
+If MAD(purity) is small: # High-quality library
+→ Use strict thresholds (upper quartile for validation)
 
-If MAD(purity) > 0.2: # Variable library
-→ Use lenient thresholds (P₅₀ for validation)
+If MAD(purity) is large: # Variable library
+→ Use lenient thresholds (median for validation)
 
 This ensures fair evaluation regardless of library-wide synthesis quality.
 
@@ -3157,7 +1577,7 @@ This ensures fair evaluation regardless of library-wide synthesis quality.
 background = median(scaled_counts) across L₀ signal
 
 **Option 2:** From low-count tail
-background = median(bottom 10% of all scaled_count values)
+background = median(low percentile tail of all scaled_count values)
 
 **Signal-to-Noise Ratio:**
 
@@ -3165,9 +1585,9 @@ SNR(C) = max(scaled_counts_product_C) / background
 
 **Interpretation:**
 
-- SNR > 10: High confidence detection (clear signal)
-- 3 ≤ SNR ≤ 10: Moderate confidence (detectable)
-- SNR < 3: Near noise floor (unreliable)
+- SNR above quantitation threshold: High confidence detection (clear signal)
+- SNR between detection and quantitation thresholds: Moderate confidence (detectable)
+- SNR below detection threshold: Near noise floor (unreliable)
 
 **Why SNR is universal:**
 
@@ -3188,13 +1608,13 @@ This is a **hard constraint** - violation implies synthesis failed OR peak assig
 **Adaptive Retention Precision:**
 
 Learn minimum resolvable time difference from data:
-Δt*min = min(retention_time*{i+1} - retention_time_i) across all peaks
+Δt_min = min(retention_time_{i+1} - retention_time_i) across all peaks
 retention_precision = Δt_min / 2
 
 **Retention Order Validation:**
 
 For confident ordering:
-t_product - t_truncation > 2 × retention_precision
+t_product - t_truncation > multiple × retention_precision
 
 If difference < precision → ambiguous (cannot distinguish)
 
@@ -3218,18 +1638,18 @@ P(synthesis_succeeded)
 
 **Purity likelihood:**
 
-- P(purity=p | succeeded) ~ Beta(α=19, β=1) [mode ≈ 0.95]
-- P(purity=p | failed) ~ Beta(α=2, β=8) [mode ≈ 0.20]
+- P(purity=p | succeeded) ~ Beta distribution with high mode (successful synthesis yields high purity)
+- P(purity=p | failed) ~ Beta distribution with low mode (failed synthesis yields low purity)
 
 **Retention order likelihood:**
 
-- P(order_correct | succeeded) = 0.95
-- P(order_correct | failed) = 0.05
+- P(order_correct | succeeded) = high probability
+- P(order_correct | failed) = low probability
 
 **Descendant evidence:**
 
-- P(descendants_validated | succeeded) = 0.90^n for n descendants
-- P(descendants_validated | failed) = 0.10^n
+- P(descendants_validated | succeeded) = high_prob^n for n descendants
+- P(descendants_validated | failed) = low_prob^n
 
 **Prior probability:**
 
@@ -3278,8 +1698,8 @@ MAD = median(|purity(Cᵢ) - median_purity|)
 
 **Outlier Detection:**
 
-Exceptionally clean: purity > median + 2×MAD
-Exceptionally poor: purity < median - 2×MAD
+Exceptionally clean: purity > median + multiple×MAD
+Exceptionally poor: purity < median - multiple×MAD
 
 ### 6.10 Validation Classification
 
@@ -3287,44 +1707,44 @@ Exceptionally poor: purity < median - 2×MAD
 
 **VALIDATED** (synthesis confirmed)
 
-- ✅ Retention time order correct (Δt > 2×precision)
-- ✅ Purity > P₇₅ (dataset 75th percentile)
-- ✅ SNR > 5
+- ✅ Retention time order correct (Δt exceeds minimum multiple of precision)
+- ✅ Purity in upper percentile tier
+- ✅ SNR above quantitation threshold
 - ✅ All descendants validated
 - ✅ Confidence interval excludes low purity
-- **Confidence: Very High (>95%)**
+- **Confidence: Very High**
 
 **LIKELY_SUCCESS** (high confidence)
 
 - ✅ Retention time order correct
-- ✅ Purity > P₅₀ (dataset median)
-- ✅ SNR > 3
-- ✅ Majority (>50%) descendants validated
-- **Confidence: High (80-95%)**
+- ✅ Purity above median
+- ✅ SNR above detection threshold
+- ✅ Majority descendants validated
+- **Confidence: High**
 
 **UNCERTAIN** (ambiguous)
 
-- ⚠️ P₂₅ < Purity < P₇₅ (middle range) OR
-- ⚠️ SNR ≈ 3 (near detection limit) OR
-- ⚠️ Retention difference < 3×precision (ambiguous order) OR
+- ⚠️ Purity in middle range OR
+- ⚠️ SNR near detection limit OR
+- ⚠️ Retention difference ambiguous OR
 - ⚠️ Mixed descendant results OR
 - ⚠️ Wide confidence interval on purity
-- **Confidence: Moderate (50-80%)**
+- **Confidence: Moderate**
 
 **LIKELY_FAILURE** (low confidence)
 
-- ❌ Purity < P₂₅ (bottom quartile) OR
-- ❌ SNR < 3 (too weak) OR
+- ❌ Purity in lower percentile tier OR
+- ❌ SNR below detection threshold OR
 - ❌ Retention order suspicious (marginal) OR
 - ❌ Multiple descendants failed
-- **Confidence: Low (20-50%)**
+- **Confidence: Low**
 
 **FAILED** (synthesis confirmed failed)
 
 - ❌ Retention time order violated (Δt < 0) OR
-- ❌ No putative product peak detected (SNR < 2) OR
+- ❌ No putative product peak detected OR
 - ❌ All descendants failed
-- **Confidence: Very High failure (>95%)**
+- **Confidence: Very High failure**
 
 ### 6.11 Uncertainty Quantification
 
@@ -3364,22 +1784,22 @@ Question: retention_time(product) > retention_time(truncations)?
 
 **Level 2: Signal Strength** (DETECTION)
 
-Question: SNR > 3?
+Question: SNR above detection threshold?
 
 - NO → LIKELY_FAILURE (below detection)
 - YES → Proceed to Level 3
 
 **Level 3: Purity Assessment** (RELATIVE QUALITY)
 
-Question: Purity > P₇₅?
+Question: Purity in upper tier?
 
 - YES → Proceed to Level 4 (potential VALIDATED)
 
-Question: Purity > P₅₀?
+Question: Purity above median?
 
 - YES → Proceed to Level 4 (potential LIKELY_SUCCESS)
 
-Question: Purity > P₂₅?
+Question: Purity in middle range?
 
 - YES → UNCERTAIN
 
@@ -3439,9 +1859,9 @@ Retention constraint: t_product - t_truncation > 2 × Δt_min/2
 
 **Adaptive Thresholds:**
 
-- High purity threshold: P₇₅(dataset)
-- Moderate purity threshold: P₅₀(dataset)
-- SNR threshold: 3.0 (universal)
+- High purity threshold: Upper quartile (dataset-derived)
+- Moderate purity threshold: Median (dataset-derived)
+- SNR threshold: Detection limit (dataset-derived)
 - Retention precision: Δt_min / 2 (dataset-specific)
 
 **Computational Complexity:**
@@ -3502,7 +1922,7 @@ Maps each level to list of compounds at that level, enabling fast same-level que
 
 **Union-Find for Connected Components** (O(α(n)) amortized)
 
-Use Union-Find data structure to identify all disconnected families in the forest structure. Build by iterating through compounds and unioning each with its descendants. Query whether two compounds belong to the same family in near-constant time O(α(n)) ≈ O(1).
+Use Union-Find data structure to identify connected components in the DAG. Build by iterating through compounds and unioning each with its descendants. Query whether two compounds belong to the same connected component in near-constant time O(α(n)) ≈ O(1). Note: Within a lineage, all compounds form a single connected component.
 
 **Interval Tree for Position Queries**
 
@@ -3569,12 +1989,14 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 **The Three Sequence Types:**
 
 1. **positional_block_sequence** (Compound property)
+
    - Full synthesis path at block granularity INCLUDING null positions
    - Example: `"Val-Null-Leu"` (3 cycles: Val at position 1, skipped position 2, Leu at position 3)
    - Use case: Identify exact synthesis path, position-specific diagnostics
    - Access: `compound.positional_block_sequence`
 
 2. **block_support_sequence** (Compound property, EquivalenceClass identifier)
+
    - Non-null building blocks only (SUPPORT = non-zero domain)
    - Example: `"Val-Leu"` (same chemistry as above, ignoring positional encoding)
    - Use case: Chemical identity at block granularity, equivalence class identifier
@@ -3601,26 +2023,9 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 - **Mathematical**: "Support" is standard mathematical concept
 - **Precise**: Clearly specifies what each sequence represents
 
-**DEPRECATED Terms** (do not use):
-
-- ❌ `positional_sequence` → Use `positional_block_sequence`
-- ❌ `residue_sequence` → Use `block_support_sequence`
-- ❌ `canonical_sequence` → Use `block_support_sequence`
-- ❌ `monomer_sequence` → Use `monomer_support_sequence`
-
-**References**:
-- THEORY.md Section 2.2: Sequence Representations (detailed definitions)
-- `src/lcseq/domain/entities/compound.py`: Property implementations
-
 ### 8.2 Hierarchical Terminology
 
-**AVOID** ❌:
-
-- "Parent compound" (ambiguous in combinatorial library)
-- "Child compound" (relative, not absolute)
-- "Top compound" (suggests unique root)
-
-**USE** ✅:
+**Standard Terms:**
 
 - **Reference compound**: The compound being analyzed
 - **Maximal compound**: Longest compound in dataset (no ancestors)
@@ -3628,6 +2033,8 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 - **Ancestor**: Compound with more building blocks
 - **Descendant**: Compound with fewer building blocks
 - **Lineage**: All related compounds (ancestors + self + descendants)
+
+**Note**: Terms like "parent", "child", or "top" are ambiguous in combinatorial libraries and should not be used.
 
 ### 8.3 Peak Classification
 
@@ -3675,13 +2082,13 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 
 **Hierarchy Mode:**
 
-- BLOCK: Building blocks as atomic units (default)
+- BLOCK: Building blocks as atomic units
 - MONOMER: Individual monomers as atomic units
 - NONE: No hierarchical analysis
 
 **Variant Mode:**
 
-- INDIVIDUAL: Analyze each positional variant separately (default, always valid)
+- INDIVIDUAL: Analyze each positional variant separately
 - POOLED: Hybrid approach - peak detection on aggregated signal, purity on individual variants (optional optimization)
 
 **Detection Method:**
@@ -3706,7 +2113,7 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 - **Pooled signal**: Aggregated signal (mean or median) across all members of equivalence class
 - **Pooled compound**: Processing entity - either real Compound (single variant) or PooledCompound (aggregate)
 - **Quotient hierarchy**: Quotient structure where nodes are equivalence classes (via edge projection from original hierarchy)
-- **Correlation threshold**: Minimum pairwise correlation for pooling validity (default: 0.8)
+- **Correlation threshold**: Minimum pairwise correlation for pooling validity (high similarity required)
 
 **IMPORTANT Distinctions:**
 
@@ -3734,6 +2141,7 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 - PooledCompound is synthetic entity, not a real member
 
 **References:**
+
 - THEORY.md Section 4.2: Equivalence Classes and Pooled Mode Analysis
 - THEORY.md Section 4.2.10: PooledCompound pattern
 - THEORY.md Section 4.2.11: Quotient hierarchy construction
@@ -3764,8 +2172,8 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 - **Valley**: Local minimum between peaks (defines peak boundaries)
 - **Prominence**: Height of peak above surrounding valleys (chromatographic significance)
 - **Poisson Z-score**: (c[i] - μ_bg) / √(μ_bg + ε) - statistical significance for count data
-- **Background (μ_bg)**: Low-count baseline (10th percentile of all counts)
-- **Statistical significance**: Peaks with Z > 3 are real signal (p < 0.001)
+- **Background (μ_bg)**: Low-count baseline (low percentile of all counts)
+- **Statistical significance**: Peaks exceeding Z-score threshold are real signal
 
 **Classification Terminology:**
 
@@ -3774,16 +2182,16 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 - **L₀ (minimal element)**: Full-null compound, descendant of ALL compounds
 - **NULL peak**: Global maximum in L₀ chromatogram (universal reference)
 - **Putative product**: Positionally consistent peak (NOT synthesis validation!)
-- **Truncation boundary**: max(truncation_positions) + truncation_margin - hard cutoff for TRUNCATION classification
-- **Truncation margin**: Absolute time margin (default: 60s) accounting for retention time variability
+- **Truncation boundary**: max(truncation_positions) + retention_margin - hard cutoff for TRUNCATION classification
+- **Truncation margin**: Time margin accounting for retention time variability
 
 **Truncation Boundary:**
 
 - **Purpose**: Prevent Hungarian algorithm from incorrectly assigning late-eluting peaks as truncations
-- **Definition**: `truncation_boundary = max(L₀_position, max(descendant_products)) + truncation_margin`
+- **Definition**: `truncation_boundary = max(L₀_position, max(descendant_products)) + retention_margin`
 - **Usage**: Peaks must elute BEFORE boundary to be classified as TRUNCATION
 - **Product constraint**: Peaks must elute AFTER boundary to be considered for PUTATIVE_PRODUCT
-- **References**: THEORY.md Section 5.3.1, `src/lcseq/config.py:66-69`
+- **References**: THEORY.md Section 5.3.1
 
 ### 8.8 Synthesis Validation Terminology
 
@@ -3792,49 +2200,21 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 - **Purity**: Fraction of product signal vs total signal
 - **SNR (Signal-to-Noise Ratio)**: Product peak height / background
 - **Retention order**: Chromatographic physics constraint (product elutes after truncations)
-- **Dataset percentile**: Relative ranking within library (P₂₅, P₅₀, P₇₅, P₉₀)
+- **Dataset percentile**: Relative ranking within library (quartiles, median, upper/lower tiers)
 - **MAD (Median Absolute Deviation)**: Robust spread measure
 
 **Validation Categories:**
 
-- **VALIDATED**: High confidence synthesis succeeded (purity > P₇₅, SNR > 5, retention correct)
-- **LIKELY_SUCCESS**: Moderate-high confidence (purity > P₅₀, SNR > 3)
+- **VALIDATED**: High confidence synthesis succeeded (purity in upper tier, high SNR, retention correct)
+- **LIKELY_SUCCESS**: Moderate-high confidence (purity above median, sufficient SNR)
 - **UNCERTAIN**: Ambiguous result (mixed signals, low counts)
-- **LIKELY_FAILURE**: Low confidence (purity < P₂₅ or SNR < 3)
+- **LIKELY_FAILURE**: Low confidence (purity in lower tier or insufficient SNR)
 - **FAILED**: High confidence synthesis failed (retention violated, no peak)
 
 **Key Distinction:**
 
 - **Peak Classification** → Positional label (PUTATIVE_PRODUCT)
 - **Synthesis Validation** → Success probability (VALIDATED, LIKELY_SUCCESS, etc.)
-
-### 8.9 Anti-Patterns to Avoid
-
-**DO NOT say:**
-
-- ❌ "Successful synthesis" when you mean "found putative product peak"
-- ❌ "Product peak" when you mean "putative product" (implies validation)
-- ❌ "The peak is the product" (we don't know chemical identity!)
-- ❌ "Parent" when context is ambiguous
-- ❌ "Sorting" when you mean "hierarchical clustering ordering"
-- ❌ "Visualization sorting" (sorting is domain logic)
-- ❌ "Infrastructure algorithm" (algorithms are domain services)
-- ❌ "Magic numbers" or "hardcoded thresholds" (use adaptive parameters!)
-- ❌ "Synthesis succeeded" based only on PUTATIVE_PRODUCT classification
-
-**DO say:**
-
-- ✅ "Putative product peak identified" (honest about limitations)
-- ✅ "Positionally consistent with expected product"
-- ✅ "Synthesis validated with 90% confidence" (after validation analysis)
-- ✅ "Maximal compound" or "reference compound"
-- ✅ "Detected via discrete Morse theory local maxima"
-- ✅ "Statistically significant peak" (Z > 3, high prominence)
-- ✅ "Similarity-based ordering" (domain service)
-- ✅ "Compound ordering service" (domain logic)
-- ✅ "Peak detection algorithm" (domain service)
-- ✅ "Adaptive threshold derived from data" (no magic numbers)
-- ✅ "Purity 85% (75th percentile of dataset)" (dataset-relative)
 
 ---
 
@@ -3849,9 +2229,11 @@ LC-Seq uses a systematic naming convention for sequences based on two dimensions
 
 ### Graph Patterns
 
-- **Building-Block Mode**: Forest (no convergence)
-- **Monomer-Level Mode**: DAG with convergence (diamonds)
-- **Convergence**: Multiple positional variants → same chemical peptide
+- **Building-Block Mode**: DAG with convergence at block granularity
+  - Positional variants with same block support converge
+- **Monomer-Level Mode**: DAG with convergence at monomer granularity
+  - Positional variants with same monomer sequence converge
+- **Convergence**: Multiple synthesis paths → same atomic unit composition
 
 ### Key Algorithms
 

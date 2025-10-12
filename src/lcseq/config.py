@@ -30,7 +30,7 @@ DEFAULT_CORRELATION_THRESHOLD = _DEFAULT_CONFIG.validation_params.get("correlati
 DEFAULT_AGGREGATION_METHOD = _DEFAULT_CONFIG.validation_params.get("aggregation_method", "mean")
 
 
-# Visualization Config Classes (backwards compatibility)
+# Configuration Classes for convenient access
 class PeakDetectionConfig:
     """Peak detection parameters from configs/default.yaml"""
     Z_THRESHOLD = DEFAULT_Z_THRESHOLD

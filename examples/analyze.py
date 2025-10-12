@@ -10,8 +10,8 @@ Analysis Modes (from config):
   pooled     - Aggregate positional variants for ~3-10× speedup
 
 Hierarchy Modes (from config):
-  building_block - Poset structure based on positional sequences
-  monomer        - DAG with convergence based on chemical identity
+  building_block - DAG with convergence at block granularity
+  monomer        - DAG with convergence at monomer granularity
 
 Usage:
     # Use default configuration (configs/default.yaml)
@@ -62,7 +62,9 @@ def analyze_lineage(args, config):
     print(f"Data: {args.data}")
     print(f"Output: {args.output}")
     print(f"Analysis Mode: {variant_mode.value} (from {'CLI' if args.variant_mode else 'config'})")
-    print(f"Hierarchy Mode: {hierarchy_mode.value} (from {'CLI' if args.hierarchy_mode else 'config'})")
+    print(
+        f"Hierarchy Mode: {hierarchy_mode.value} (from {'CLI' if args.hierarchy_mode else 'config'})"
+    )
 
     args.output.mkdir(exist_ok=True, parents=True)
     plots_dir = args.output / "plots"
@@ -107,7 +109,9 @@ def analyze_lineage(args, config):
     lineage_finder = LineageFinderService()
     lineage = lineage_finder.find_principal_ideal(reference, compounds, hierarchy_mode)
     print(f"✓ Found: {len(lineage)} compounds (reference + {len(lineage)-1} descendants)")
-    print(f"  Reduction: {len(compounds):,} → {len(lineage)} ({100*len(lineage)/len(compounds):.2f}%)")
+    print(
+        f"  Reduction: {len(compounds):,} → {len(lineage)} ({100*len(lineage)/len(compounds):.2f}%)"
+    )
 
     # STEP 4: Build hierarchy
     print("\n" + "=" * 80)
@@ -158,7 +162,8 @@ def analyze_lineage(args, config):
 
         # Report correlation warnings
         low_corr_classes = [
-            eq for eq in equivalence_classes.values()
+            eq
+            for eq in equivalence_classes.values()
             if eq.pooling_status == PoolingStatus.POOLING_INVALID
         ]
         if low_corr_classes:
@@ -235,8 +240,16 @@ def analyze_lineage(args, config):
         # Show pooling statistics
         print("\n  Pooling Statistics:")
         high_corr = sum(1 for eq in equivalence_classes.values() if eq.is_pooling_valid)
-        low_corr = sum(1 for eq in equivalence_classes.values() if eq.pooling_status == PoolingStatus.POOLING_INVALID)
-        single = sum(1 for eq in equivalence_classes.values() if eq.pooling_status == PoolingStatus.NOT_ATTEMPTED)
+        low_corr = sum(
+            1
+            for eq in equivalence_classes.values()
+            if eq.pooling_status == PoolingStatus.POOLING_INVALID
+        )
+        single = sum(
+            1
+            for eq in equivalence_classes.values()
+            if eq.pooling_status == PoolingStatus.NOT_ATTEMPTED
+        )
         print(f"    High correlation (≥0.8): {high_corr}/{n_classes}")
         print(f"    Low correlation (<0.8): {low_corr}/{n_classes}")
         print(f"    Single variant: {single}/{n_classes}")
@@ -291,8 +304,8 @@ Analysis Modes:
   pooled     - Aggregate positional variants (~3-10× speedup)
 
 Hierarchy Modes:
-  monomer        - DAG with convergence, chemical identity (default)
-  building_block - Poset structure based on positional sequences
+  monomer        - DAG with convergence at monomer granularity (default)
+  building_block - DAG with convergence at block granularity
         """,
     )
 
@@ -345,10 +358,16 @@ Hierarchy Modes:
 
     # Convert CLI overrides to enums
     if args.variant_mode:
-        args.variant_mode = AnalysisMode.POOLED if args.variant_mode == "pooled" else AnalysisMode.INDIVIDUAL
+        args.variant_mode = (
+            AnalysisMode.POOLED if args.variant_mode == "pooled" else AnalysisMode.INDIVIDUAL
+        )
 
     if args.hierarchy_mode:
-        args.hierarchy_mode = HierarchyMode.BUILDING_BLOCK if args.hierarchy_mode == "building_block" else HierarchyMode.MONOMER
+        args.hierarchy_mode = (
+            HierarchyMode.BUILDING_BLOCK
+            if args.hierarchy_mode == "building_block"
+            else HierarchyMode.MONOMER
+        )
 
     # Run analysis
     analyze_lineage(args, config)

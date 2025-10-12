@@ -17,9 +17,11 @@ analysis:
   variant_mode: individual
 
   # Hierarchy mode: compound relationship structure
-  # - building_block: building-block-level hierarchy (forest structure)
-  # - monomer: monomer-level hierarchy (DAG with convergence)
-  # Reference: THEORY.md Section 3.3
+  # - building_block: DAG with convergence at block granularity
+  #   (positional variants with same blocks converge)
+  # - monomer: DAG with convergence at monomer granularity
+  #   (positional variants with same monomers converge)
+  # Reference: THEORY.md Section 3.3, 4.2.2, 4.2.3
   hierarchy_mode: building_block
 
 # =============================================================================

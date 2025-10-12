@@ -2,6 +2,8 @@
 Chromatogram plotter for visualizing time-series chromatogram data.
 
 Implementation based on THEORY.md Section 5.0-5.3.
+
+Note: Baseline correction removed per THEORY.md - raw signals perform better.
 """
 
 from pathlib import Path
@@ -25,8 +27,6 @@ class ChromatogramPlotter(BasePlotter):
     - Detected peaks with markers and labels
     - Multiple signal variants (raw, derivatives)
     - Peak classifications (NULL, TRUNCATION, PUTATIVE_PRODUCT, UNKNOWN)
-
-    Note: Baseline correction removed per THEORY.md - raw signals perform better.
     """
 
     # Color scheme for peak types
@@ -42,7 +42,6 @@ class ChromatogramPlotter(BasePlotter):
         chromatogram: Chromatogram,
         peaks: Optional[List[Peak]] = None,
         signal_variant: str = "raw",
-        show_baseline: bool = False,
         title: Optional[str] = None,
     ) -> Figure:
         """
@@ -56,8 +55,6 @@ class ChromatogramPlotter(BasePlotter):
             Detected peaks to overlay
         signal_variant : str, optional
             Signal variant to plot (default: "raw")
-        show_baseline : bool, optional
-            DEPRECATED - Baseline correction removed. Parameter kept for backwards compatibility but ignored.
         title : str, optional
             Plot title
 
@@ -74,9 +71,6 @@ class ChromatogramPlotter(BasePlotter):
 
         # Plot main signal
         ax.plot(time, signal, "b-", linewidth=1.5, label=f"{signal_variant.capitalize()} signal")
-
-        # Note: Baseline plotting removed - baseline correction no longer supported per THEORY.md
-        # show_baseline parameter kept for backwards compatibility but is ignored
 
         # Plot peaks
         if peaks:

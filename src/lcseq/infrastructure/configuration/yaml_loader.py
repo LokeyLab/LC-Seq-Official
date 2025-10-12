@@ -113,8 +113,7 @@ class ConfigurationLoader:
             "snr_threshold": validation.get("snr_threshold", "auto"),
         }
 
-        # Merge pooling params into validation_params for backwards compatibility
-        # (correlation_threshold was historically in validation_params)
+        # Include pooling params in validation_params for unified access
         validation_params.update(pooling_params)
 
         # Extract visualization parameters (stored in peak_detection_params for now)

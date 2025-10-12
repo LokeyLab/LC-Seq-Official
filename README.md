@@ -1,23 +1,22 @@
 # LC-Seq
 
-**Production-ready DNA-Encoded Library chromatographic data analysis**
+**DNA-Encoded Library Chromatographic Data Analysis**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Coverage](https://img.shields.io/badge/coverage-67%25-yellow.svg)]()
 
-A complete Python package for analyzing chromatography data from DNA-encoded library (DEL) screens. LC-Seq provides robust peak detection, hierarchical truncation analysis, and adaptive synthesis validation based on rigorous mathematical foundations.
+A Python package for analyzing chromatography data from DNA-encoded library (DEL) screens. LC-Seq provides mathematically rigorous peak detection, hierarchical truncation analysis, and adaptive synthesis validation based on Discrete Morse Theory, DAG-based classification, and Bayesian validation.
 
 ## Features
 
-- 🔬 **Rigorous Peak Detection**: Morse theory + persistent homology for noise-robust peak identification
-- 📊 **Adaptive Validation**: Dataset-relative thresholds with Bayesian confidence assessment
+- 🔬 **Rigorous Peak Detection**: Discrete Morse Theory for local maxima detection with Poisson statistics for significance testing
+- 📊 **Adaptive Validation**: Dataset-relative thresholds with Bayesian confidence assessment (no magic numbers!)
 - 🌳 **Hierarchical Analysis**: DAG-based truncation analysis with automatic ancestor-descendant relationships
-- 🎯 **Pooled Mode**: Automatic aggregation of positional variants with fallback handling
-- 🏗️ **Clean Architecture**: Production-ready design with clear layer separation
-- 🔒 **Type-Safe**: Full type hints and static checking with mypy strict mode
-- ✅ **Well-Tested**: 590+ tests with 67% coverage (91% domain layer)
-- 🚀 **User-Friendly CLI**: Simple commands with rich output formatting
+- 🎯 **Pooled Mode**: Hybrid strategy for positional variant aggregation with automatic correlation-based fallback
+- 🏗️ **Clean Architecture**: Clear separation of domain, application, infrastructure, and presentation layers
+- 🔒 **Type-Safe**: Full type hints with mypy strict mode compatibility
+- 📚 **Comprehensive Theory**: 2,270-line THEORY.md documenting mathematical foundations
+- 🔧 **Working Examples**: Fully functional analysis pipeline in `examples/`
 
 ## Installation
 
@@ -25,7 +24,7 @@ A complete Python package for analyzing chromatography data from DNA-encoded lib
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/LC-Seq-Official.git
+git clone https://github.com/LokeyLab/LC-Seq-Official.git
 cd LC-Seq-Official
 
 # Create virtual environment
@@ -47,49 +46,62 @@ pip install lcseq
 
 ## Quick Start
 
-### Command Line Interface
+### Using the Example Analysis Script
+
+The script supports **4 analysis modes** (2 variant modes × 2 hierarchy modes):
 
 ```bash
-# Install with CLI support
-pip install -e ".[cli]"
+# 1. Individual + Monomer (default) - Full detail, chemical identity focus
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode monomer --variant-mode individual
 
-# Run analysis with default settings
-lcseq analyze data.csv --library design.csv --output results/
+# 2. Individual + Building-Block - Full detail, synthesis position focus
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode building_block
 
-# Use custom configuration
-lcseq analyze data.csv --library design.csv --config configs/default.yaml
+# 3. Pooled + Monomer - Fast processing, chemical identity focus
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled --hierarchy-mode monomer
 
-# Enable pooled mode for positional variants
-lcseq analyze data.csv --library design.csv --variant-mode pooled
-
-# Show capabilities
-lcseq info
+# 4. Pooled + Building-Block - Fast processing, synthesis position focus
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled --hierarchy-mode building_block
 ```
+
+**Data Requirements**: The example script works with the included test dataset (`test_data/processed_data.h5`). To use your own data, format it as HDF5 with the same structure (see `examples/README.md` for details).
+
+**Customizing Parameters**: All analysis parameters are controlled by `configs/default.yaml`. To customize:
+
+1. Copy the default config: `cp configs/default.yaml configs/my_config.yaml`
+2. Edit your copy to adjust parameters (peak detection thresholds, validation criteria, etc.)
+3. Run with your config: `python examples/analyze.py --reference "Phe-DNvl-DPhe" --config configs/my_config.yaml`
+
+See the **Configuration** section below for details on available parameters.
+
+See `examples/README.md` for complete usage guide and all mode combinations.
 
 ### Programmatic Usage
 
 ```python
-from lcseq import Compound, Chromatogram, Peak, AnalysisConfiguration
-from lcseq.application.pipelines.full_analysis_pipeline import FullAnalysisPipeline
-from lcseq.application.dtos.analysis_request import AnalysisRequest
+from lcseq.domain.entities import Compound, Chromatogram, Peak
+from lcseq.domain.services import HierarchyBuilder, PeakDetector
+from lcseq.infrastructure.configuration import ConfigurationLoader
+from lcseq.infrastructure.loaders import HDF5CompoundLoader
 
-# Create analysis request
-request = AnalysisRequest(
-    data_path="data.csv",
-    library_path="design.csv",
-    configuration=AnalysisConfiguration.get_default(),
-)
+# Load configuration
+config = ConfigurationLoader.get_default_config()
 
-# Run pipeline
-pipeline = FullAnalysisPipeline()
-response = pipeline.execute(request)
+# Load data
+loader = HDF5CompoundLoader()
+compounds = loader.load_all("data.h5")
 
-# Examine results
-print(f"Validation rate: {response.validation_summary.validation_rate:.1%}")
-print(f"Median purity: {response.validation_summary.median_purity:.3f}")
+# Build hierarchy
+builder = HierarchyBuilder()
+hierarchy = builder.build(compounds, hierarchy_mode="monomer")
+
+# Detect peaks
+detector = PeakDetector(config)
+for compound in compounds:
+    peaks = detector.detect(compound.chromatogram)
 ```
 
-**See [QUICKSTART.md](docs/QUICKSTART.md) for complete usage guide.**
+See `examples/analyze.py` for complete working implementation.
 
 ## Development
 
@@ -97,51 +109,32 @@ print(f"Median purity: {response.validation_summary.median_purity:.3f}")
 
 ```
 LC-Seq-Official/
-├── src/lcseq/              # Main package (Clean Architecture)
+├── src/lcseq/              # Main package (~15,800 lines)
 │   ├── domain/             # Pure domain logic (zero external dependencies)
-│   │   ├── entities/       # Core entities (23 files)
-│   │   ├── value_objects/  # Value objects (4 files)
-│   │   ├── models/         # Graph models (5 files)
-│   │   └── services/       # Domain services (13 files)
+│   │   ├── entities/       # Core entities (6 files: Compound, Peak, Chromatogram, etc.)
+│   │   ├── value_objects/  # Value objects (RetentionTime, PeakBoundaries, etc.)
+│   │   ├── models/         # Graph models (CompoundHierarchy, EquivalenceClass, etc.)
+│   │   └── services/       # Domain services (23 files: peak detection, validation, etc.)
 │   ├── application/        # Use cases and orchestration
 │   │   ├── pipelines/      # Full analysis pipeline
+│   │   ├── use_cases/      # Individual/pooled chromatogram processing
 │   │   └── dtos/           # Data transfer objects
 │   ├── infrastructure/     # I/O adapters
 │   │   ├── parsers/        # CSV/Excel parsing
-│   │   ├── exporters/      # Result export
+│   │   ├── exporters/      # CSV/JSON/Excel export
+│   │   ├── loaders/        # HDF5 compound loading
 │   │   ├── repositories/   # Data persistence
 │   │   └── configuration/  # YAML config loading
-│   └── interfaces/         # External interfaces
-│       └── cli/            # Command-line interface
-├── tests/                  # Test suite (590+ tests, 67% coverage)
-│   ├── test_domain/        # Domain layer tests (584 tests)
-│   ├── test_integration/   # Integration tests
-│   └── fixtures/           # Test data
-├── configs/                # Configuration
-│   └── default.yaml        # Single Source of Truth for all configuration
+│   └── presentation/       # External interfaces
+│       ├── cli/            # Command-line interface
+│       └── visualization/  # Plotting and visualization
+├── configs/                # Configuration files
+│   └── default.yaml        # Default configuration (Single Source of Truth)
 ├── docs/                   # Documentation
-│   ├── THEORY.md           # Mathematical foundations (3,772 lines)
-│   ├── ARCHITECTURE.md     # Clean architecture guide
-│   ├── IMPLEMENTATION_PLAN.md  # 8-week roadmap
-│   ├── QUICKSTART.md       # User guide
-│   └── PHASE_1_4_REPORT.md # Implementation report
-└── examples/               # Example datasets and workflows
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=lcseq --cov-report=html
-
-# Run specific test file
-pytest tests/test_domain/test_chromatogram.py
-
-# Run with verbose output
-pytest -v
+│   └── THEORY.md           # Mathematical foundations (2,270 lines)
+└── examples/               # Working examples
+    ├── analyze.py          # Lineage analysis script (fully functional)
+    └── README.md           # Usage guide
 ```
 
 ### Code Quality
@@ -163,25 +156,29 @@ pre-commit run --all-files
 ### Adding New Features
 
 1. **Create a new branch**
+
    ```bash
    git checkout -b feature/my-new-feature
    ```
 
-2. **Write tests first** (test-driven development)
-   ```bash
-   # Add tests in tests/test_*/
-   pytest tests/test_algorithms/test_my_feature.py
-   ```
+2. **Implement the feature**
 
-3. **Implement the feature**
    - Add code to appropriate module in `src/lcseq/`
    - Follow type hints and docstring conventions
    - Keep functions focused and testable
+   - Update THEORY.md if adding new algorithms
 
-4. **Verify code quality**
+3. **Verify code quality**
+
    ```bash
    pre-commit run --all-files
-   pytest
+   mypy src/
+   ```
+
+4. **Test with examples**
+
+   ```bash
+   python examples/analyze.py --reference "Phe-DNvl-DPhe"
    ```
 
 5. **Create pull request**
@@ -191,81 +188,195 @@ pre-commit run --all-files
 The package follows **Clean Architecture** (Hexagonal Architecture) principles:
 
 1. **Domain Layer**: Pure domain logic with zero external dependencies
-   - Entities: `Compound`, `Chromatogram`, `Peak`, `BuildingBlock`
-   - Algorithms: Morse theory peak detection, DAG-based classification
-   - Services: Hierarchy building, validation, pooled mode analysis
+
+   - Entities: `Compound`, `Chromatogram`, `Peak`, `BuildingBlock`, `PooledCompound`
+   - Value Objects: `RetentionTime`, `PeakBoundaries`, `BuildingBlockSequence`, `MonomerSequence`
+   - Models: `CompoundHierarchy`, `EquivalenceClass`, `PeakClassification`
+   - Services: 23 domain services including peak detection, hierarchy building, validation
 
 2. **Application Layer**: Use cases and orchestration
-   - Use cases coordinate domain services
-   - Ports define I/O boundaries (file loading, storage, configuration)
+
+   - `ProcessChromatogramsUseCase`: Individual variant processing
+   - `ProcessPooledChromatogramsUseCase`: Pooled variant processing
+   - `FullAnalysisPipeline`: Complete analysis workflow
 
 3. **Infrastructure Layer**: I/O adapters
-   - HDF5 persistence, YAML configuration, CSV/JSON export
 
-4. **Interface Layer**: External adapters
-   - CLI (Typer-based), visualization (matplotlib/plotly)
+   - HDF5 compound loading
+   - YAML configuration
+   - CSV/JSON/Excel export
+   - Library and result repositories
 
-**Key Principle**: Dependencies always flow inward (Interface → Infrastructure → Application → Domain)
+4. **Presentation Layer**: External interfaces
+   - CLI (command-line interface)
+   - Visualization (plotting and chromatogram display)
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for complete architectural specifications.
+**Key Principle**: Dependencies always flow inward (Presentation → Infrastructure → Application → Domain)
+
+See `THEORY.md` for mathematical foundations and `examples/analyze.py` for architectural implementation.
 
 ## Implementation Status
 
-**Current Status**: Production-ready v0.1.0 with complete core functionality
+**Current Status**: Core algorithms implemented with working examples
 
 ### Completed ✅
 
-**Phase 1: Domain Layer** (23 components)
-- ✅ Core entities: BuildingBlock, Compound, Chromatogram, Peak
-- ✅ Value objects: RetentionTime, PeakBoundaries, BuildingBlockSequence, MonomerSequence
-- ✅ Graph models: CompoundHierarchy, EquivalenceClass, PeakClassification
-- ✅ Domain services: 13 services including HierarchyBuilder, PeakDetector, ValidationChecker
-- ✅ 584 unit tests with 91% domain layer coverage
+**Domain Layer** (Pure business logic, ~15,800 lines)
 
-**Phase 2: Synthesis Validation Layer** (3 modules)
-- ✅ BayesianValidator with prior probabilities
-- ✅ Adaptive validation with dataset-relative thresholds
-- ✅ Pooling validator for positional variants
+- ✅ **Entities**: Compound, Chromatogram, Peak, BuildingBlock, PooledCompound (6 files)
+- ✅ **Value Objects**: RetentionTime, PeakBoundaries, BuildingBlockSequence, MonomerSequence
+- ✅ **Models**: CompoundHierarchy, EquivalenceClass, PeakClassification
+- ✅ **Services**: 23 domain services implementing core algorithms:
+  - Peak detection (Discrete Morse Theory + Poisson statistics)
+  - Hierarchy building (DAG construction for building-block and monomer modes)
+  - Peak classification (constraint propagation through hierarchy)
+  - Validation (Bayesian confidence assessment)
+  - Pooled mode (positional variant aggregation with correlation validation)
 
-**Phase 3: Application Layer** (4 modules)
-- ✅ FullAnalysisPipeline orchestrating complete workflow
-- ✅ DTOs for request/response boundaries
-- ✅ Composition root with dependency injection
+**Application Layer** (Use cases and orchestration)
 
-**Phase 4: Infrastructure Layer** (12 modules)
-- ✅ CSV/Excel parsers and exporters
-- ✅ Library repository for compound management
-- ✅ Configuration infrastructure with YAML support
-- ✅ Result export to multiple formats
+- ✅ `ProcessChromatogramsUseCase`: Individual variant analysis
+- ✅ `ProcessPooledChromatogramsUseCase`: Hybrid pooling strategy
+- ✅ `FullAnalysisPipeline`: Complete workflow orchestration
 
-**Phase 5: Interface Layer** (CLI)
-- ✅ Typer-based CLI with rich formatting
-- ✅ Comprehensive YAML configuration (single source of truth)
-- ✅ Progress reporting and error handling
-- ✅ QUICKSTART.md comprehensive user guide
+**Infrastructure Layer** (I/O adapters)
 
-### Statistics
-- **Total Code**: ~9,938 lines (domain + application + infrastructure)
-- **Total Tests**: 590+ tests with 67% overall coverage
-- **Domain Coverage**: 91% (high confidence in core logic)
-- **Configuration**: Single SSoT in configs/default.yaml
-- **Documentation**: 3,772 lines of theory + architecture + guides
+- ✅ HDF5 compound loading
+- ✅ YAML configuration system
+- ✅ CSV/JSON/Excel exporters
+- ✅ Library and result repositories
 
-### Deferred to v0.2.0
-- ⏳ Visualization layer (matplotlib/plotly adapters)
-- ⏳ HDF5 data format support
-- ⏳ Property-based testing with Hypothesis
-- ⏳ Performance optimization for >10,000 compound libraries
+**Presentation Layer** (External interfaces)
+
+- ✅ CLI framework
+- ✅ Visualization plotters (chromatogram, lineage, hierarchy)
+
+**Working Examples**
+
+- ✅ `examples/analyze.py`: Fully functional lineage analysis script
+- ✅ Supports both hierarchy modes (building-block, monomer)
+- ✅ Supports both variant modes (individual, pooled)
+- ✅ Config-driven with CLI overrides
+
+**Documentation**
+
+- ✅ **THEORY.md**: 2,270 lines documenting mathematical foundations
+  - Discrete Morse Theory for peak detection
+  - DAG structure and poset theory
+  - Bayesian validation framework
+  - Pooled mode mathematics
+- ✅ **examples/README.md**: Complete usage guide
+- ✅ Configuration examples in `configs/default.yaml`
+
+### In Progress / Planned
+
+**Testing Infrastructure**
+
+- ⏳ Comprehensive test suite (unit, integration, property-based)
+- ⏳ Test coverage reporting
+- ⏳ CI/CD pipeline
+
+**Additional Documentation**
+
+- ⏳ Architecture documentation (detailed design specifications)
+- ⏳ User guide (step-by-step tutorials)
+- ⏳ API reference documentation
+
+**Features**
+
+- ⏳ Performance optimization for large libraries (>10,000 compounds)
+- ⏳ Additional export formats
+- ⏳ Interactive visualization tools
 
 ## Contributing
 
 Contributions are welcome! Please:
 
 1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass and code quality checks succeed
-5. Submit a pull request
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Implement your feature following Clean Architecture principles
+4. Add type hints and docstrings
+5. Run code quality checks (`pre-commit run --all-files`)
+6. Update THEORY.md if adding new algorithms or mathematical concepts
+7. Test with `examples/analyze.py`
+8. Submit a pull request with clear description
+
+See the **Adding New Features** section above for detailed workflow.
+
+## Configuration
+
+All analysis parameters are controlled by `configs/default.yaml` (Single Source of Truth). The config file contains:
+
+**Analysis Settings:**
+
+- `variant_mode`: `individual` or `pooled` (default: `individual`)
+- `hierarchy_mode`: `monomer` or `building_block` (default: `monomer`)
+
+**Peak Detection:**
+
+- `min_persistence`: Minimum peak persistence (prominence threshold)
+- `z_threshold`: Z-score threshold for statistical significance (Poisson test)
+- `prominence_percentile`: Percentile for adaptive prominence filtering
+- `min_snr`: Minimum signal-to-noise ratio
+
+**Validation:**
+
+- Purity thresholds (percentile-based, dataset-relative)
+- SNR thresholds (detection and quantitation limits)
+- Retention time precision parameters
+
+**Pooling (for pooled mode):**
+
+- `correlation_threshold`: Minimum correlation for valid pooling
+- `aggregation_method`: `mean` or `median` for signal pooling
+
+### How to Customize
+
+1. **Copy the default config:**
+
+   ```bash
+   cp configs/default.yaml configs/my_config.yaml
+   ```
+
+2. **Edit your config file:**
+
+   ```yaml
+   analysis:
+     variant_mode: pooled # Enable pooled mode by default
+     hierarchy_mode: building_block # Use building-block hierarchy
+
+   detection:
+     min_persistence: 0.03 # Lower threshold = more sensitive
+     z_threshold: 2.5 # Lower threshold = detect weaker peaks
+
+   pooling:
+     correlation_threshold: 0.75 # More lenient pooling threshold
+   ```
+
+3. **Run with your config:**
+   ```bash
+   python examples/analyze.py --reference "Phe-DNvl-DPhe" --config configs/my_config.yaml
+   ```
+
+**Note**: CLI arguments override config values. For example, `--variant-mode pooled` overrides the config file setting.
+
+See `configs/default.yaml` for complete parameter documentation with comments.
+
+---
+
+## Documentation
+
+- **[THEORY.md](docs/THEORY.md)**: Comprehensive mathematical foundations (2,270 lines)
+  - Discrete Morse Theory for peak detection
+  - DAG-based classification theory
+  - Bayesian validation framework
+  - Pooled mode mathematics
+  - Domain vocabulary and terminology
+- **[examples/README.md](examples/README.md)**: Complete usage guide
+  - All 4 mode combinations explained
+  - Data format requirements
+  - Troubleshooting guide
+- **[configs/default.yaml](configs/default.yaml)**: Complete configuration reference with inline documentation
 
 ## Citation
 
