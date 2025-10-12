@@ -15,7 +15,7 @@ A Python package for analyzing chromatography data from DNA-encoded library (DEL
 - 🎯 **Pooled Mode**: Hybrid strategy for positional variant aggregation with automatic correlation-based fallback
 - 🏗️ **Clean Architecture**: Clear separation of domain, application, infrastructure, and presentation layers
 - 🔒 **Type-Safe**: Full type hints with mypy strict mode compatibility
-- 📚 **Comprehensive Theory**: 2,270-line THEORY.md documenting mathematical foundations
+- 📚 **Comprehensive Theory**: 2,270-line [THEORY.md](docs/THEORY.md) documenting mathematical foundations
 - 🔧 **Working Examples**: Fully functional analysis pipeline in `examples/`
 
 ## Installation
@@ -64,7 +64,7 @@ python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled --h
 python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled --hierarchy-mode building_block
 ```
 
-**Data Requirements**: The example script works with the included test dataset (`test_data/processed_data.h5`). To use your own data, format it as HDF5 with the same structure (see `examples/README.md` for details).
+**Data Requirements**: The example script works with the included test dataset (`test_data/processed_data.h5`). To use your own data, format it as HDF5 with the same structure (see [examples/README.md](examples/README.md) for details).
 
 **Customizing Parameters**: All analysis parameters are controlled by `configs/default.yaml`. To customize:
 
@@ -74,7 +74,7 @@ python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled --h
 
 See the **Configuration** section below for details on available parameters.
 
-See `examples/README.md` for complete usage guide and all mode combinations.
+See [examples/README.md](examples/README.md) for complete usage guide and all mode combinations.
 
 ### Programmatic Usage
 
@@ -166,7 +166,7 @@ pre-commit run --all-files
    - Add code to appropriate module in `src/lcseq/`
    - Follow type hints and docstring conventions
    - Keep functions focused and testable
-   - Update THEORY.md if adding new algorithms
+   - Update [THEORY.md](docs/THEORY.md) if adding new algorithms
 
 3. **Verify code quality**
 
@@ -213,7 +213,7 @@ The package follows **Clean Architecture** (Hexagonal Architecture) principles:
 
 **Key Principle**: Dependencies always flow inward (Presentation → Infrastructure → Application → Domain)
 
-See `THEORY.md` for mathematical foundations and `examples/analyze.py` for architectural implementation.
+See [THEORY.md](docs/THEORY.md) for mathematical foundations and `examples/analyze.py` for architectural implementation.
 
 ## Implementation Status
 
@@ -260,12 +260,12 @@ See `THEORY.md` for mathematical foundations and `examples/analyze.py` for archi
 
 **Documentation**
 
-- ✅ **THEORY.md**: 2,270 lines documenting mathematical foundations
+- ✅ **[THEORY.md](docs/THEORY.md)**: 2,270 lines documenting mathematical foundations
   - Discrete Morse Theory for peak detection
   - DAG structure and poset theory
   - Bayesian validation framework
   - Pooled mode mathematics
-- ✅ **examples/README.md**: Complete usage guide
+- ✅ **[examples/README.md](examples/README.md)**: Complete usage guide
 - ✅ Configuration examples in `configs/default.yaml`
 
 ### In Progress / Planned
@@ -297,7 +297,7 @@ Contributions are welcome! Please:
 3. Implement your feature following Clean Architecture principles
 4. Add type hints and docstrings
 5. Run code quality checks (`pre-commit run --all-files`)
-6. Update THEORY.md if adding new algorithms or mathematical concepts
+6. Update [THEORY.md](docs/THEORY.md) if adding new algorithms or mathematical concepts
 7. Test with `examples/analyze.py`
 8. Submit a pull request with clear description
 
