@@ -1,0 +1,194 @@
+# LC-Seq Configuration
+#
+# This is the canonical configuration file for LC-Seq analysis.
+# All parameters for peak detection, classification, validation, pooling,
+# and visualization are specified here.
+#
+# References: THEORY.md for mathematical specifications
+
+# =============================================================================
+# Analysis Settings
+# =============================================================================
+analysis:
+  # Variant mode: how to handle positional variants
+  # - individual: analyze each variant separately (default)
+  # - pooled: aggregate variants, fallback if correlation < threshold
+  # Reference: THEORY.md Section 4.2
+  variant_mode: individual
+
+  # Hierarchy mode: compound relationship structure
+  # - building_block: building-block-level hierarchy (forest structure)
+  # - monomer: monomer-level hierarchy (DAG with convergence)
+  # Reference: THEORY.md Section 3.3
+  hierarchy_mode: building_block
+
+# =============================================================================
+# Peak Detection Parameters
+# =============================================================================
+detection:
+  # Minimum persistence threshold for peak detection
+  # Filters topologically insignificant peaks using persistent homology
+  # Range: 0.01 - 0.1 (0.05 recommended, 5% of signal range)
+  # Reference: THEORY.md Section 5.2
+  min_persistence: 0.05
+
+  # Poisson Z-score threshold for statistical significance
+  # Z > 3.0 corresponds to p < 0.001 (highly significant)
+  # Used to identify peaks that are statistically unlikely to be noise
+  # Reference: THEORY.md Section 5.1
+  z_threshold: 3.0
+
+  # Prominence percentile threshold
+  # Retains only the most prominent peaks (top X%)
+  # 0.5 = retain top 50% most prominent peaks
+  # 0.0 = disable (retain all peaks)
+  # Lower value = more strict (fewer peaks retained)
+  # Reference: THEORY.md Section 5.2.3
+  prominence_percentile: 0.5
+
+  # Local SNR filter threshold multiplier
+  # Threshold = min(SNRs) + min_snr * std(SNRs)
+  # Set to 0.0 to disable local SNR filtering
+  # Note: Currently not visualized (would be misleading)
+  min_snr: 0.001
+
+  # Global baseline filter (in standard deviations)
+  # Peak height must exceed: min(signal) + min_baseline_sds * std(signal)
+  # Set to 0.0 to disable global baseline filtering
+  # Reference: THEORY.md Section 5.1.2
+  min_baseline_sds: 1.0
+
+  # Peak boundary detection method
+  # - valley_or_5pct: use valleys, fallback to 5% height threshold (recommended)
+  # - valley_only: require valley detection
+  # - threshold_only: always use 5% threshold
+  # Reference: THEORY.md Section 5.2.4
+  boundary_method: valley_or_5pct
+
+  # Signal variant to use for detection
+  # "raw" = no baseline correction, no smoothing (per THEORY.md)
+  # This is the canonical signal for detection
+  signal_variant: raw
+
+# =============================================================================
+# Peak Classification Parameters
+# =============================================================================
+classification:
+  # Truncation boundary margin (in seconds)
+  # Product peaks must be this far beyond max(truncation_positions)
+  # Accounts for retention time variability in peak matching
+  # Reference: THEORY.md Section 5.4
+  truncation_margin: 60.0
+
+  # Peak matching tolerance (relative fraction)
+  # Used for Hungarian algorithm and position matching
+  # Relative tolerance: |measured - expected| / expected
+  # Reference: THEORY.md Section 5.5
+  peak_matching_tolerance: 0.01
+
+  # Minimum threshold for Hungarian algorithm (fraction of signal length)
+  # Accounts for discrete fractionation in LC-Seq
+  # Reference: THEORY.md Section 5.5
+  hungarian_min_threshold: 0.02
+
+# =============================================================================
+# Pooled Mode Parameters
+# =============================================================================
+pooling:
+  # Correlation threshold for validity
+  # Variants must have min(pairwise correlation) > threshold
+  # 0.8 = strong similarity required (recommended)
+  # 0.0 = disable correlation check (not recommended)
+  # Reference: THEORY.md Section 4.2.3
+  correlation_threshold: 0.8
+
+  # Aggregation method for pooled signal
+  # - mean: faster, smoother (recommended)
+  # - median: more robust to outliers
+  # Reference: THEORY.md Section 4.2.2
+  aggregation_method: mean
+
+# =============================================================================
+# Validation Parameters
+# =============================================================================
+validation:
+  # Purity threshold mode
+  # Adaptive thresholds from dataset distribution
+  # - auto: use P₂₅ percentile from dataset (default)
+  # - strict: use P₅₀ percentile
+  # - lenient: use P₁₀ percentile
+  # - <float>: explicit threshold value (e.g., 0.75)
+  # Reference: THEORY.md Section 6.4
+  purity_threshold: auto
+
+  # Signal-to-noise ratio threshold mode
+  # Dataset-relative thresholds
+  # - auto: use P₅₀ percentile from dataset (default)
+  # - strict: use P₇₅ percentile
+  # - lenient: use P₂₅ percentile
+  # - <float>: explicit threshold value (e.g., 10.0)
+  # Reference: THEORY.md Section 6.5
+  snr_threshold: auto
+
+# =============================================================================
+# Visualization Parameters
+# =============================================================================
+visualization:
+  # Layout parameters
+  layout:
+    # Time conversion factor (seconds → minutes)
+    seconds_per_minute: 60.0
+
+    # Normal vertical spacing between compounds
+    offset_spacing: 0.5
+
+    # Extra spacing between different block support sequence groups
+    group_spacing_extra: 1.0
+
+  # Color parameters
+  colors:
+    # Use rainbow colormap by block support sequence
+    # true = chemically identical compounds get same color
+    # false = all signals and markers are black (publication-ready)
+    use_colormap: true
+
+  # Line styling parameters
+  lines:
+    # Default trace line width
+    linewidth_default: 1.5
+
+    # Reference compound line width (thicker for emphasis)
+    linewidth_reference: 3.0
+
+    # Trace transparency (1.0 = opaque, 0.0 = transparent)
+    alpha_trace: 1.0
+
+  # Marker parameters
+  markers:
+    # Peak marker size
+    marker_size: 6
+
+  # Text parameters
+  text:
+    # Sequence label font size
+    label_fontsize: 10
+
+    # Maximum label length before truncation
+    label_max_length: 40
+
+    # Number of characters to show when truncating
+    label_truncate_length: 4
+
+  # Figure dimensions
+  figure:
+    # Figure width in inches
+    fig_width: 16
+
+    # Base figure height
+    fig_height_base: 4
+
+    # Additional height per trace
+    fig_height_per_trace: 0.4
+
+    # Minimum figure height
+    fig_height_min: 10

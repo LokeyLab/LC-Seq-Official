@@ -14,12 +14,16 @@ class HierarchyMode(Enum):
     """
     Hierarchy construction mode.
 
+    Both modes use equivalence class logic based on atomic units:
+
     Attributes
     ----------
     BUILDING_BLOCK : str
-        Building-block mode: forest structure, no convergence
+        Building-block mode: DAG with convergence at block granularity
+        (positional variants with same blocks → same equivalence class)
     MONOMER : str
-        Monomer mode: DAG with convergence (diamond patterns)
+        Monomer mode: DAG with convergence at monomer granularity
+        (positional variants with same monomers → same equivalence class)
     """
 
     BUILDING_BLOCK = "building_block"
@@ -32,16 +36,16 @@ class CompoundHierarchy:
     Directed Acyclic Graph (DAG) representing truncation relationships.
 
     A poset structure where compounds are ordered by truncation relationships.
-    Supports two modes:
-    - Building-block mode: Forest structure (THEORY.md 4.2.2)
-    - Monomer mode: DAG with convergence (THEORY.md 4.2.3)
+    Both modes use equivalence class logic (atomic unit principle):
+    - Building-block mode: Convergence at block granularity (THEORY.md 4.2.2)
+    - Monomer mode: Convergence at monomer granularity (THEORY.md 4.2.3)
 
     Attributes
     ----------
     mode : HierarchyMode
         Building-block or monomer mode
     compounds : List[Compound]
-        All compounds in the hierarchy
+        All compounds in the hierarchy (all positional variants, no deduplication)
     edges : Dict[Compound, Set[Compound]]
         Direct descendant relationships: ancestor → {descendants}
 
@@ -49,8 +53,8 @@ class CompoundHierarchy:
     -----
     - Graph is directed acyclic (DAG)
     - Edges flow from longer → shorter sequences (maximal → minimal)
-    - Building-block mode: No convergence (forest of trees)
-    - Monomer mode: Convergence allowed (multiple paths to same compound)
+    - Building-block mode: Positional variants with same blocks converge
+    - Monomer mode: Positional variants with same monomers converge
     - Store only direct descendants (transitive reduction)
     - Ancestors computed via reverse traversal
 
@@ -90,8 +94,8 @@ class CompoundHierarchy:
     ----------
     THEORY.md Section 1.1: Core Mathematical Model (DAG/Poset)
     THEORY.md Section 3.3: Hierarchy Properties
-    THEORY.md Section 4.2.2: Building-Block Mode (Forest)
-    THEORY.md Section 4.2.3: Monomer Mode (DAG with Convergence)
+    THEORY.md Section 4.2.2: Building-Block Mode (Convergence at Block Granularity)
+    THEORY.md Section 4.2.3: Monomer Mode (Convergence at Monomer Granularity)
     """
 
     mode: HierarchyMode
@@ -241,12 +245,17 @@ class CompoundHierarchy:
         -----
         Computes principal ideal ↓X in poset terminology (THEORY.md 3.2).
 
+        Uses graph traversal on edges built by HierarchyBuilder.
+        In building block mode, positional variants with same block support
+        will have same descendants because edges are built using block support logic.
+
         References
         ----------
         THEORY.md Section 3.2: Principal Ideal ↓X
         """
         if compound not in self.compounds:
             return []
+
         return self._get_all_descendants(compound)
 
     def get_ancestors(self, compound: Compound) -> List[Compound]:
@@ -305,8 +314,8 @@ class CompoundHierarchy:
 
         Notes
         -----
-        In building-block mode: roots of trees in forest.
-        In monomer mode: longest sequences in dataset.
+        Typically the reference compound(s) at the root of the lineage.
+        In both modes: longest sequences in the analysis set.
 
         References
         ----------
@@ -506,9 +515,9 @@ class CompoundHierarchy:
             out_degree[ancestor] = len(descendants_set)
 
         # Start with minimal elements (out-degree 0 = no descendants, includes L₀)
-        # Sort by (level, canonical_sequence) for stable, semantically meaningful order
+        # Sort by (level, block_support_sequence) for stable, semantically meaningful order
         minimal = [c for c in self.compounds if out_degree[c] == 0]
-        queue = sorted(minimal, key=lambda c: (getattr(c, level_attr), c.residue_sequence))
+        queue = sorted(minimal, key=lambda c: (getattr(c, level_attr), c.block_support_sequence))
         result = []
 
         # Process compounds in dependency order (bottom-up)
@@ -525,7 +534,7 @@ class CompoundHierarchy:
                     if out_degree[ancestor] == 0:
                         queue.append(ancestor)
                         # Maintain sorted order for stable tie-breaking
-                        queue.sort(key=lambda c: (getattr(c, level_attr), c.residue_sequence))
+                        queue.sort(key=lambda c: (getattr(c, level_attr), c.block_support_sequence))
 
         # Verify all compounds processed (detect cycles)
         if len(result) != len(self.compounds):

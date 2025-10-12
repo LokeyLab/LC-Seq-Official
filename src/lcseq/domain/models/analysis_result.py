@@ -26,7 +26,7 @@ class AnalysisResult:
     hierarchy : CompoundHierarchy
         DAG/Poset of truncation relationships
     equivalence_classes : List[EquivalenceClass]
-        Grouped positional variants (used in consensus mode)
+        Grouped positional variants (used in pooled mode)
     peak_classifications : Dict[Compound, List[PeakClassification]]
         All peak classifications per compound
     validation_results : Dict[Compound, ValidationStatus]
@@ -215,15 +215,15 @@ class AnalysisResult:
         return summary
 
     def get_equivalence_class(
-        self, residue_sequence: str
+        self, block_support_sequence: str
     ) -> Optional[EquivalenceClass]:
         """
-        Get equivalence class by residue sequence.
+        Get equivalence class by block support sequence.
 
         Parameters
         ----------
-        residue_sequence : str
-            Canonical residue sequence
+        block_support_sequence : str
+            Block support sequence (non-null blocks)
 
         Returns
         -------
@@ -231,7 +231,7 @@ class AnalysisResult:
             Equivalence class, or None if not found
         """
         for eq_class in self.equivalence_classes:
-            if eq_class.residue_sequence == residue_sequence:
+            if eq_class.block_support_sequence == block_support_sequence:
                 return eq_class
         return None
 

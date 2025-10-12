@@ -13,13 +13,6 @@ from numpy.typing import NDArray
 from typing import List, Tuple
 from ..entities.chromatogram import Chromatogram
 from ..entities.peak import Peak
-from ...config import (
-    DEFAULT_Z_THRESHOLD,
-    DEFAULT_PROMINENCE_PERCENTILE,
-    DEFAULT_MIN_SNR,
-    DEFAULT_MIN_BASELINE_SDS,
-    DEFAULT_SIGNAL_VARIANT,
-)
 
 
 class PeakDetector:
@@ -71,11 +64,11 @@ class PeakDetector:
     def detect_peaks(
         self,
         chromatogram: Chromatogram,
-        z_threshold: float = DEFAULT_Z_THRESHOLD,
-        prominence_percentile: float = DEFAULT_PROMINENCE_PERCENTILE,
-        min_snr: float = DEFAULT_MIN_SNR,
-        min_baseline_sds: float = DEFAULT_MIN_BASELINE_SDS,
-        signal_variant: str = DEFAULT_SIGNAL_VARIANT,
+        z_threshold: float = 3.0,
+        prominence_percentile: float = 0.5,
+        min_snr: float = 0.001,
+        min_baseline_sds: float = 1.0,
+        signal_variant: str = "raw",
     ) -> List[Peak]:
         """
         Detect significant peaks in chromatogram.

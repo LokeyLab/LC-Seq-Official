@@ -61,6 +61,12 @@ class LineageFinderService:
         - Reference compound X
         - All compounds that are descendants of X (truncations)
 
+        Building Block Mode vs Monomer Mode:
+        - Building Block: Uses block support sequence for descendant checking
+          (all positional variants included)
+        - Monomer: Uses full monomer sequence for descendant checking
+          (all positional variants included)
+
         Performance:
         - O(N * M) where N = library size, M = sequence length
         - Much faster than building full 64k-compound hierarchy first
@@ -79,6 +85,7 @@ class LineageFinderService:
         -------
         List[Compound]
             Lineage members: [reference] + descendants (principal ideal ↓X)
+            All positional variants are included in both modes
 
         Examples
         --------
@@ -95,7 +102,7 @@ class LineageFinderService:
         lineage = [reference]
 
         if mode == HierarchyMode.BUILDING_BLOCK:
-            # Building-block mode: position-by-position comparison
+            # Building-block mode: block support sequence descendant checking
             for compound in compounds:
                 if compound == reference:
                     continue
@@ -114,9 +121,16 @@ class LineageFinderService:
     def _is_building_block_descendant(self, candidate: Compound, reference: Compound) -> bool:
         """Check if candidate is a building-block descendant of reference.
 
-        Building-block descendant rules:
+        Building-block descendant rules (THEORY.md Section 3.3):
         - Lower or equal level (candidate.level <= reference.level)
-        - At each position: same building block OR null
+        - Candidate's block_support_sequence is a subsequence of reference's
+        - Positions are IGNORED - only non-null blocks matter
+
+        Examples:
+            Reference: "Leu-Ala-Pro" (block_support_sequence: "Leu-Ala-Pro")
+            Descendant: "Leu-Pro" (block_support_sequence: "Leu-Pro") ✓
+            NOT descendant: "Leu-Null-Pro" (block_support_sequence: "Leu-Pro" at DIFFERENT positions) ✓
+            NOT descendant: "Pro-Leu" (wrong order) ✗
 
         Returns True if candidate is descendant, False otherwise.
         """
@@ -124,20 +138,32 @@ class LineageFinderService:
         if candidate.level > reference.level:
             return False
 
-        # Check position-by-position
-        candidate_bbs = candidate.building_blocks
-        reference_bbs = reference.building_blocks
+        # Get block support sequences (non-null blocks only)
+        candidate_blocks = [bb.code for bb in reversed(candidate.building_blocks) if not bb.is_null]
+        reference_blocks = [bb.code for bb in reversed(reference.building_blocks) if not bb.is_null]
 
-        if len(candidate_bbs) != len(reference_bbs):
-            return False
+        # All-null compound is descendant of everything
+        if not candidate_blocks:
+            return True
 
-        for cpd_bb, ref_bb in zip(candidate_bbs, reference_bbs):
-            # Each position must be: same block OR null
-            if cpd_bb.is_null:
-                continue  # Null is allowed (truncation)
-            if cpd_bb.code != ref_bb.code:
-                return False  # Different block = not descendant
+        # Candidate must be subsequence of reference (same order, possible gaps)
+        # Use greedy left-to-right matching
+        ref_idx = 0
+        for cand_block in candidate_blocks:
+            # Find next occurrence of cand_block in remaining reference
+            found = False
+            while ref_idx < len(reference_blocks):
+                if reference_blocks[ref_idx] == cand_block:
+                    ref_idx += 1
+                    found = True
+                    break
+                ref_idx += 1
 
+            if not found:
+                # Block not found in remaining reference sequence
+                return False
+
+        # All candidate blocks matched in order
         return True
 
     def _is_monomer_descendant(self, candidate: Compound, reference: Compound, debug: bool = False) -> bool:

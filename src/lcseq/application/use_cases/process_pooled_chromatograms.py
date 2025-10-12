@@ -1,19 +1,20 @@
-"""Use case for chromatogram processing in consensus mode.
+"""Use case for chromatogram processing in pooled mode.
 
-This use case implements the hybrid consensus strategy from THEORY.md Section 4.2.3:
-- Phase 1: Peak detection on consensus signal (expensive, once per class)
+This use case implements the hybrid pooled strategy from THEORY.md Section 4.2.3:
+- Phase 1: Peak detection on pooled signal (expensive, once per class)
 - Phase 2: Area integration on individual variants (cheap, per variant)
 """
 
 from typing import List, Dict, Optional, Tuple
-from lcseq.domain.entities import Compound, VirtualCompound
-from lcseq.domain.models import EquivalenceClass, CompoundHierarchy, ConsensusStatus
+from lcseq.domain.entities import Compound, PooledCompound
+from lcseq.domain.models import EquivalenceClass, CompoundHierarchy, PoolingStatus
 from lcseq.domain.services import (
     SignalAggregator,
     EquivalenceClassBuilder,
     HierarchyBuilder,
 )
 from lcseq.application.use_cases import ProcessChromatogramsUseCase
+
 from lcseq.config import (
     DEFAULT_Z_THRESHOLD,
     DEFAULT_PROMINENCE_PERCENTILE,
@@ -26,18 +27,18 @@ from lcseq.config import (
 )
 
 
-class ProcessChromatogramsConsensusUseCase:
+class ProcessPooledChromatogramsUseCase:
     """
-    Use case for processing chromatograms in consensus mode.
+    Use case for processing chromatograms in pooled mode.
 
-    Implements hybrid consensus strategy:
-    1. Group compounds into equivalence classes (by residue sequence)
+    Implements hybrid pooled strategy:
+    1. Group compounds into equivalence classes (by block support sequence)
     2. For each class:
-       a. Aggregate variant signals → consensus
+       a. Aggregate variant signals → pooled signal
        b. Validate correlation (automatic fallback if invalid)
-       c. Peak detection on consensus (expensive, once)
-       d. Peak classification on consensus
-       e. For each variant: integrate areas using consensus boundaries (cheap)
+       c. Peak detection on pooled signal (expensive, once)
+       d. Peak classification on pooled signal
+       e. For each variant: integrate areas using pooled boundaries (cheap)
 
     This provides ~3-10× speedup for peak detection while preserving
     individual purity measurements.
@@ -46,12 +47,12 @@ class ProcessChromatogramsConsensusUseCase:
     -----
     - Automatic fallback to individual mode if correlation < threshold
     - Individual purities always computed from variant's own signal
-    - Consensus mode is optional optimization (individual mode is default)
+    - Pooled mode is optional optimization (individual mode is default)
 
     References
     ----------
-    THEORY.md Section 4.2.2: Consensus Mode
-    THEORY.md Section 4.2.3: Hybrid Consensus Strategy
+    THEORY.md Section 4.2.2: Pooled Mode
+    THEORY.md Section 4.2.3: Hybrid Pooled Strategy
     THEORY.md Section 4.2.8: Validity Requirements
     """
 
@@ -89,7 +90,7 @@ class ProcessChromatogramsConsensusUseCase:
         aggregation_method: str = DEFAULT_AGGREGATION_METHOD,
     ) -> Tuple[Dict[str, EquivalenceClass], List[Compound], CompoundHierarchy]:
         """
-        Process chromatograms using hybrid consensus mode.
+        Process chromatograms using hybrid pooled mode.
 
         Parameters
         ----------
@@ -110,61 +111,62 @@ class ProcessChromatogramsConsensusUseCase:
         truncation_margin : float
             Margin beyond truncation positions (in seconds)
         correlation_threshold : float
-            Minimum correlation for consensus validity
+            Minimum correlation for pooling validity
         aggregation_method : str
             Aggregation method ("mean" or "median")
 
         Returns
         -------
         Tuple[Dict[str, EquivalenceClass], List[Compound], CompoundHierarchy]
-            - Dictionary mapping residue sequence to equivalence class with results
-            - List of representative compounds (VirtualCompound or Compound)
-            - Representative hierarchy (one node per equivalence class)
+            - Dictionary mapping block support sequence to equivalence class with results
+            - List of pooled compounds (PooledCompound or Compound)
+            - Quotient hierarchy (one node per equivalence class)
 
         Notes
         -----
         Each EquivalenceClass contains:
-        - consensus_chromatogram: Aggregated signal (if consensus valid)
-        - consensus_peaks: Peaks detected on consensus
-        - consensus_status: CONSENSUS_VALID or fallback reason
+        - pooled_chromatogram: Aggregated signal (if pooling valid)
+        - pooled_peaks: Peaks detected on pooled signal
+        - pooling_status: POOLING_VALID or fallback reason
         - variants (compounds): Individual results with purities
 
         Algorithm:
         1. Build equivalence classes from compounds
         2. For each class:
-           a. Attempt consensus aggregation + validation
-           b. Create representative compound (consensus or fallback to variants)
-        3. Process ALL representatives through standard pipeline (reuses existing logic!)
-        4. Copy results from representatives to all variants in class
+           a. Attempt pooled aggregation + validation
+           b. Create pooled compound (pooled or fallback to variants)
+        3. Process ALL pooled compounds through standard pipeline (reuses existing logic!)
+        4. Copy results from pooled compounds to all variants in class
 
         References
         ----------
-        THEORY.md Section 4.2.3: Hybrid Consensus Strategy
+        THEORY.md Section 4.2.3: Hybrid Pooled Strategy
         THEORY.md Section 4.2.8: Validity Requirements & Automatic Fallback
+        THEORY.md Section 4.2.11: Quotient Hierarchy
         """
         # Step 1: Build equivalence classes from original compounds
         equivalence_classes = self.class_builder.build(compounds)
 
-        # Step 2: Create representative compounds for each equivalence class
-        # Representatives are either real compounds (single variant) or virtual compounds (consensus)
-        representative_to_class = {}
-        representatives = []
+        # Step 2: Create pooled compounds for each equivalence class
+        # Pooled compounds are either real compounds (single variant) or pooled compounds
+        pooled_compound_to_class = {}
+        pooled_compounds = []
         results = {}
 
         for eq_class in equivalence_classes:
             # Convert Set to List for processing
-            variants = list(eq_class.compounds)
+            variants = list(eq_class.members)
 
             if len(variants) == 1:
-                # Single variant - use it directly as representative
-                representative = variants[0]
-                eq_class.consensus_status = ConsensusStatus.NOT_ATTEMPTED
+                # Single variant - use it directly as pooled compound
+                pooled_compound = variants[0]
+                eq_class.pooling_status = PoolingStatus.NOT_ATTEMPTED
                 eq_class.fallback_reason = "Single variant (no aggregation needed)"
 
             else:
                 # Multiple variants - ALWAYS aggregate (correlation is just metadata)
                 (
-                    consensus_chromatogram,
+                    pooled_chromatogram,
                     min_correlation,
                     is_valid,
                     reason,
@@ -175,87 +177,87 @@ class ProcessChromatogramsConsensusUseCase:
                 )
 
                 eq_class.correlation_min = min_correlation
-                eq_class.consensus_chromatogram = consensus_chromatogram
+                eq_class.pooled_chromatogram = pooled_chromatogram
 
-                # Create VirtualCompound with consensus chromatogram
+                # Create PooledCompound with pooled chromatogram
                 # Use first variant as the template for building blocks and hierarchy position
-                real_representative = variants[0]
-                representative = VirtualCompound(
-                    real_compound=real_representative,
-                    consensus_chromatogram=consensus_chromatogram,
+                real_pooled_compound = variants[0]
+                pooled_compound = PooledCompound(
+                    real_compound=real_pooled_compound,
+                    pooled_chromatogram=pooled_chromatogram,
                 )
 
                 if is_valid:
-                    eq_class.consensus_status = ConsensusStatus.CONSENSUS_VALID
+                    eq_class.pooling_status = PoolingStatus.POOLING_VALID
                 else:
-                    # Low correlation - still use consensus, but flag it
-                    eq_class.consensus_status = ConsensusStatus.CONSENSUS_INVALID
+                    # Low correlation - still use pooled signal, but flag it
+                    eq_class.pooling_status = PoolingStatus.POOLING_INVALID
                     eq_class.fallback_reason = reason
 
-            # Store mapping and add to representatives list
-            representative_to_class[representative] = eq_class
-            representatives.append(representative)
+            # Store mapping and add to pooled compounds list
+            pooled_compound_to_class[pooled_compound] = eq_class
+            pooled_compounds.append(pooled_compound)
 
             # Store result
-            results[eq_class.residue_sequence] = eq_class
+            results[eq_class.block_support_sequence] = eq_class
 
-        # Step 3: Build representative hierarchy by projecting original hierarchy edges
-        # We cannot rebuild from scratch because VirtualCompounds only know about one variant
+        # Step 3: Build quotient hierarchy by projecting original hierarchy edges
+        # We cannot rebuild from scratch because PooledCompounds only know about one variant
         # Instead, we project edges from the original hierarchy onto equivalence classes
 
         # Create empty hierarchy with same mode
         from lcseq.domain.models import CompoundHierarchy
-        representative_hierarchy = CompoundHierarchy(mode=hierarchy.mode)
+        quotient_hierarchy = CompoundHierarchy(mode=hierarchy.mode)
 
-        # Add all representatives as nodes
-        for rep in representatives:
-            representative_hierarchy.add_compound(rep)
+        # Add all pooled compounds as nodes
+        for pooled_compound in pooled_compounds:
+            quotient_hierarchy.add_compound(pooled_compound)
 
         # Project edges: if any variant in class A is ancestor of any variant in class B,
-        # then representative(A) is ancestor of representative(B)
-        # Build mapping: residue_sequence -> representative
-        residue_to_rep = {}
-        for rep, eq_class in representative_to_class.items():
-            residue_to_rep[eq_class.residue_sequence] = rep
+        # then pooled_compound(A) is ancestor of pooled_compound(B)
+        # Build mapping: block_support_sequence -> pooled_compound
+        block_support_to_pooled = {}
+        for pooled_compound, eq_class in pooled_compound_to_class.items():
+            block_support_to_pooled[eq_class.block_support_sequence] = pooled_compound
 
-        # Build mapping: original compound -> residue_sequence
-        compound_to_residue = {}
+        # Build mapping: original compound -> block_support_sequence
+        compound_to_block_support = {}
         for eq_class in equivalence_classes:
-            for variant in eq_class.compounds:
-                compound_to_residue[variant] = eq_class.residue_sequence
+            for variant in eq_class.members:
+                compound_to_block_support[variant] = eq_class.block_support_sequence
 
         # Project edges from original hierarchy
         # IMPORTANT: Use get_direct_descendants() to avoid creating transitive edges
         # We want to preserve the DAG structure, not create a transitive closure
         edges_added = set()
         for compound in hierarchy.compounds:
-            if compound not in compound_to_residue:
+            if compound not in compound_to_block_support:
                 continue
 
-            ancestor_residue = compound_to_residue[compound]
-            ancestor_rep = residue_to_rep[ancestor_residue]
+            ancestor_block_support = compound_to_block_support[compound]
+            ancestor_pooled = block_support_to_pooled[ancestor_block_support]
 
             # Get only direct descendants (not transitive closure)
             direct_descendants = hierarchy.get_direct_descendants(compound)
             for desc in direct_descendants:
-                if desc not in compound_to_residue:
+                if desc not in compound_to_block_support:
                     continue
 
-                desc_residue = compound_to_residue[desc]
-                desc_rep = residue_to_rep[desc_residue]
+                desc_block_support = compound_to_block_support[desc]
+                desc_pooled = block_support_to_pooled[desc_block_support]
 
-                # Add edge if not already added and not same residue
-                edge = (ancestor_rep, desc_rep)
-                if edge not in edges_added and ancestor_residue != desc_residue:
-                    representative_hierarchy.add_edge(ancestor_rep, desc_rep)
+                # Add edge if not already added and not same block support sequence
+                edge = (ancestor_pooled, desc_pooled)
+                if edge not in edges_added and ancestor_block_support != desc_block_support:
+                    quotient_hierarchy.add_edge(ancestor_pooled, desc_pooled)
                     edges_added.add(edge)
 
-        # Step 4: Process representatives through standard pipeline with representative hierarchy
-        # This ensures virtual compounds' descendants are other representatives,
+        # Step 4: Process pooled compounds through standard pipeline with quotient hierarchy
+        # This ensures pooled compounds' descendants are other pooled compounds,
         # not individual variants from the original hierarchy
         peaks_dict = self.process_use_case.execute(
-            compounds=representatives,
-            hierarchy=representative_hierarchy,  # NEW hierarchy!
+            compounds=pooled_compounds,
+            hierarchy=quotient_hierarchy,  # Quotient hierarchy!
             z_threshold=z_threshold,
             prominence_percentile=prominence_percentile,
             min_snr=min_snr,
@@ -264,16 +266,16 @@ class ProcessChromatogramsConsensusUseCase:
             truncation_margin=truncation_margin,
         )
 
-        # Step 5: Copy results from representatives to all variants in each class
-        for representative, eq_class in representative_to_class.items():
-            variants = list(eq_class.compounds)
+        # Step 5: Copy results from pooled compounds to all variants in each class
+        for pooled_compound, eq_class in pooled_compound_to_class.items():
+            variants = list(eq_class.members)
 
-            # Store consensus peaks (from virtual or real representative)
-            eq_class.consensus_peaks = representative.detected_peaks
+            # Store pooled peaks (from pooled or real compound)
+            eq_class.pooled_peaks = pooled_compound.detected_peaks
 
             # Copy detected peaks and selected peak to all variants in this class
             for variant in variants:
-                variant.detected_peaks = representative.detected_peaks
-                variant.selected_peak = representative.selected_peak
+                variant.detected_peaks = pooled_compound.detected_peaks
+                variant.selected_peak = pooled_compound.selected_peak
 
-        return results, representatives, representative_hierarchy
+        return results, pooled_compounds, quotient_hierarchy

@@ -1,5 +1,5 @@
 """
-SignalAggregator - Aggregates signals from positional variants into consensus.
+SignalAggregator - Aggregates signals from positional variants into pooled signal.
 
 Implementation based on THEORY.md Section 4.2.4-4.2.5.
 """
@@ -13,7 +13,7 @@ from ...entities.chromatogram import Chromatogram
 
 class SignalAggregator:
     """
-    Aggregates chromatograms from positional variants into consensus signal.
+    Aggregates chromatograms from positional variants into pooled signal.
 
     Performs signal alignment, aggregation (mean or median), and correlation
     validation to ensure variants have similar chromatographic behavior.
@@ -27,7 +27,7 @@ class SignalAggregator:
 
     References
     ----------
-    THEORY.md Section 4.2.4: Consensus Signal Aggregation
+    THEORY.md Section 4.2.4: Pooled Signal Aggregation
     THEORY.md Section 4.2.8: Validity Requirements
     """
 
@@ -38,7 +38,7 @@ class SignalAggregator:
         correlation_threshold: float = 0.8,
     ) -> Tuple[Chromatogram, float, bool, str]:
         """
-        Aggregate variant signals into consensus chromatogram.
+        Aggregate variant signals into pooled chromatogram.
 
         Parameters
         ----------
@@ -51,8 +51,8 @@ class SignalAggregator:
 
         Returns
         -------
-        consensus_chromatogram : Chromatogram
-            Aggregated consensus chromatogram
+        pooled_chromatogram : Chromatogram
+            Aggregated pooled chromatogram
         min_correlation : float
             Minimum pairwise correlation between variants
         is_valid : bool
@@ -65,13 +65,13 @@ class SignalAggregator:
         Algorithm:
         1. Determine common time grid (union of all time points)
         2. Interpolate each variant to common grid
-        3. Compute consensus signal (mean or median)
+        3. Compute pooled signal (mean or median)
         4. Validate via pairwise correlation
-        5. Return consensus + validation results
+        5. Return pooled signal + validation results
 
         References
         ----------
-        THEORY.md Section 4.2.4: Consensus Signal Aggregation
+        THEORY.md Section 4.2.4: Pooled Signal Aggregation
         THEORY.md Section 4.2.8: Check 1 - Signal Correlation
         """
         if not variants:
@@ -98,12 +98,12 @@ class SignalAggregator:
             )
             aligned_signals.append(aligned)
 
-        # Step 3: Compute consensus signal
+        # Step 3: Compute pooled signal
         aligned_array = np.array(aligned_signals)
         if method == "mean":
-            consensus_signal = np.mean(aligned_array, axis=0)
+            pooled_signal = np.mean(aligned_array, axis=0)
         elif method == "median":
-            consensus_signal = np.median(aligned_array, axis=0)
+            pooled_signal = np.median(aligned_array, axis=0)
         else:
             raise ValueError(f"Unknown aggregation method: {method}")
 
@@ -119,13 +119,13 @@ class SignalAggregator:
                 f"(min={min_correlation:.3f} < {correlation_threshold})"
             )
 
-        # Step 6: Create consensus chromatogram
-        consensus_chromatogram = Chromatogram(
+        # Step 6: Create pooled chromatogram
+        pooled_chromatogram = Chromatogram(
             time_points=time_grid,
-            counts=consensus_signal,
+            counts=pooled_signal,
         )
 
-        return consensus_chromatogram, min_correlation, is_valid, reason
+        return pooled_chromatogram, min_correlation, is_valid, reason
 
     def _compute_common_time_grid(
         self, variants: List[Compound]
@@ -241,15 +241,15 @@ class SignalAggregator:
 
         return min(correlations)
 
-    def validate_consensus(
+    def validate_pooling(
         self,
         variants: List[Compound],
         correlation_threshold: float = 0.8,
     ) -> Tuple[float, bool, str]:
         """
-        Validate consensus without computing full aggregation.
+        Validate pooling without computing full aggregation.
 
-        Fast validation-only check for consensus viability.
+        Fast validation-only check for pooling viability.
 
         Parameters
         ----------

@@ -1,8 +1,8 @@
 """
-Virtual Compound - Proxy for consensus chromatogram processing.
+Pooled Compound - Proxy for pooled chromatogram processing.
 
-This module provides VirtualCompound, a safe immutable proxy that allows
-processing consensus chromatograms through the standard pipeline while
+This module provides PooledCompound, a safe immutable proxy that allows
+processing pooled chromatograms through the standard pipeline while
 preserving the original compound data.
 """
 
@@ -12,17 +12,17 @@ from .chromatogram import Chromatogram
 from .peak import Peak
 
 
-class VirtualCompound:
+class PooledCompound:
     """
-    Virtual compound for consensus chromatogram processing.
+    Pooled compound for pooled chromatogram processing.
 
-    VirtualCompound acts as a proxy that:
-    - Uses a consensus chromatogram for peak detection
+    PooledCompound acts as a proxy that:
+    - Uses a pooled chromatogram for peak detection
     - Delegates all other properties to the real compound
     - Stores pipeline results separately (detected_peaks, selected_peak)
     - Maintains compatibility with hierarchy lookups via __eq__ and __hash__
 
-    This allows consensus mode to process aggregated signals through the
+    This allows pooled mode to process aggregated signals through the
     standard pipeline without mutating the original compound data.
 
     Safety Features
@@ -35,60 +35,61 @@ class VirtualCompound:
 
     Examples
     --------
-    >>> # Create virtual compound with consensus chromatogram
-    >>> virtual = VirtualCompound(real_compound, consensus_chrom)
+    >>> # Create pooled compound with pooled chromatogram
+    >>> pooled = PooledCompound(real_compound, pooled_chrom)
     >>>
-    >>> # Process through pipeline (uses consensus_chrom)
-    >>> peaks = detector.detect_peaks(virtual.chromatogram)
-    >>> virtual.detected_peaks = peaks
+    >>> # Process through pipeline (uses pooled_chrom)
+    >>> peaks = detector.detect_peaks(pooled.chromatogram)
+    >>> pooled.detected_peaks = peaks
     >>>
-    >>> # Virtual compound works with hierarchy
-    >>> assert virtual in hierarchy.compounds  # True (via __hash__)
-    >>> descendants = hierarchy.get_descendants(virtual)  # Works!
+    >>> # Pooled compound works with hierarchy
+    >>> assert pooled in hierarchy.compounds  # True (via __hash__)
+    >>> descendants = hierarchy.get_descendants(pooled)  # Works!
     >>>
     >>> # Transfer results to real compounds
-    >>> for variant in equivalence_class.compounds:
-    ...     variant.detected_peaks = virtual.detected_peaks
+    >>> for variant in equivalence_class.members:
+    ...     variant.detected_peaks = pooled.detected_peaks
 
     Notes
     -----
-    VirtualCompound is a temporary processing artifact. After pipeline
+    PooledCompound is a temporary processing artifact. After pipeline
     execution, results should be transferred to the real compounds and
-    the virtual compound discarded.
+    the pooled compound discarded.
 
     References
     ----------
-    THEORY.md Section 4.2: Consensus Mode
+    THEORY.md Section 4.2: Pooled Mode
+    THEORY.md Section 4.2.8: PooledCompound Implementation
     """
 
     # Restrict attributes to prevent accidental creation
-    __slots__ = ('_real', '_consensus_chromatogram', 'detected_peaks', 'selected_peak')
+    __slots__ = ('_real', '_pooled_chromatogram', 'detected_peaks', 'selected_peak')
 
-    def __init__(self, real_compound: Compound, consensus_chromatogram: Chromatogram):
+    def __init__(self, real_compound: Compound, pooled_chromatogram: Chromatogram):
         """
-        Create virtual compound with consensus chromatogram.
+        Create pooled compound with pooled chromatogram.
 
         Parameters
         ----------
         real_compound : Compound
             Real compound to delegate properties to
-        consensus_chromatogram : Chromatogram
-            Consensus chromatogram to use for peak detection
+        pooled_chromatogram : Chromatogram
+            Pooled chromatogram to use for peak detection
         """
         # Use object.__setattr__ to bypass our custom __setattr__
         object.__setattr__(self, '_real', real_compound)
-        object.__setattr__(self, '_consensus_chromatogram', consensus_chromatogram)
+        object.__setattr__(self, '_pooled_chromatogram', pooled_chromatogram)
         object.__setattr__(self, 'detected_peaks', [])
         object.__setattr__(self, 'selected_peak', None)
 
     @property
     def chromatogram(self) -> Chromatogram:
         """
-        Return consensus chromatogram instead of real compound's chromatogram.
+        Return pooled chromatogram instead of real compound's chromatogram.
 
-        This is the key override that allows consensus signal processing.
+        This is the key override that allows pooled signal processing.
         """
-        return self._consensus_chromatogram
+        return self._pooled_chromatogram
 
     def __getattr__(self, name: str):
         """
@@ -107,7 +108,7 @@ class VirtualCompound:
         accessing internal state incorrectly.
         """
         if name.startswith('_'):
-            raise AttributeError(f"VirtualCompound has no attribute '{name}'")
+            raise AttributeError(f"PooledCompound has no attribute '{name}'")
         return getattr(self._real, name)
 
     def __setattr__(self, name: str, value):
@@ -126,7 +127,7 @@ class VirtualCompound:
             object.__setattr__(self, name, value)
         else:
             raise AttributeError(
-                f"Cannot set attribute '{name}' on VirtualCompound. "
+                f"Cannot set attribute '{name}' on PooledCompound. "
                 f"Only 'detected_peaks' and 'selected_peak' can be modified."
             )
 
@@ -135,8 +136,8 @@ class VirtualCompound:
         Equality based on real compound for hierarchy lookups.
 
         This ensures:
-        - virtual_compound == real_compound returns True
-        - virtual_compound in hierarchy.compounds returns True
+        - pooled_compound == real_compound returns True
+        - pooled_compound in hierarchy.compounds returns True
         - Hierarchy edge lookups work correctly
 
         Parameters
@@ -147,10 +148,10 @@ class VirtualCompound:
         Returns
         -------
         bool
-            True if other is the same real compound or a virtual compound
+            True if other is the same real compound or a pooled compound
             wrapping the same real compound
         """
-        if isinstance(other, VirtualCompound):
+        if isinstance(other, PooledCompound):
             return self._real == other._real
         return self._real == other
 
@@ -159,8 +160,8 @@ class VirtualCompound:
         Hash based on real compound for hierarchy lookups.
 
         This ensures:
-        - hash(virtual_compound) == hash(real_compound)
-        - Virtual compound can be used as dict key
+        - hash(pooled_compound) == hash(real_compound)
+        - Pooled compound can be used as dict key
         - Hierarchy set operations work correctly
 
         Returns
@@ -177,6 +178,6 @@ class VirtualCompound:
         Returns
         -------
         str
-            Representation showing this is a virtual compound wrapping a real one
+            Representation showing this is a pooled compound wrapping a real one
         """
-        return f"VirtualCompound({self._real.positional_block_sequence})"
+        return f"PooledCompound({self._real.positional_block_sequence})"

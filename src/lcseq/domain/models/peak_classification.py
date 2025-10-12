@@ -147,7 +147,7 @@ class PeakClassification:
         conf_str = f", confidence={self.confidence:.3f}" if self.confidence else ""
         return (
             f"PeakClassification("
-            f"compound='{self.compound.positional_sequence}', "
+            f"compound='{self.compound.positional_block_sequence}', "
             f"peak_pos={self.peak.position:.2f}, "
             f"type={self.classification.value}"
             f"{conf_str})"
@@ -157,6 +157,6 @@ class PeakClassification:
         """String representation for display."""
         conf_str = f" (conf={self.confidence:.2f})" if self.confidence else ""
         return (
-            f"{self.compound.positional_sequence}: "
+            f"{self.compound.positional_block_sequence}: "
             f"{self.classification.value} at {self.peak.position:.2f}{conf_str}"
         )

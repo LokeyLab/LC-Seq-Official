@@ -12,9 +12,9 @@ from ..entities.peak import Peak
 from ..entities.chromatogram import Chromatogram
 
 
-class ConsensusStatus(Enum):
+class PoolingStatus(Enum):
     """
-    Status of consensus mode processing for an equivalence class.
+    Status of pooled mode processing for an equivalence class.
 
     References
     ----------
@@ -22,10 +22,10 @@ class ConsensusStatus(Enum):
     """
 
     NOT_ATTEMPTED = "not_attempted"
-    CONSENSUS_VALID = "consensus_valid"
-    CONSENSUS_INVALID = "consensus_invalid"
+    POOLING_VALID = "pooling_valid"
+    POOLING_INVALID = "pooling_invalid"
     HETEROGENEOUS = "heterogeneous"
-    CONSENSUS_INVALID_BUT_SIMILAR = "consensus_invalid_but_similar"
+    POOLING_INVALID_BUT_SIMILAR = "pooling_invalid_but_similar"
 
 
 @dataclass
@@ -37,7 +37,7 @@ class EquivalenceClass:
     Multiple positional block sequences (different synthesis paths) that produce
     the same chemical molecule at block granularity.
 
-    Supports both individual mode (default) and optional consensus mode
+    Supports both individual mode (default) and optional pooled mode
     for performance optimization.
 
     Attributes
@@ -46,12 +46,12 @@ class EquivalenceClass:
         Equivalence class identifier (non-null building blocks only)
     members : Set[Compound]
         All positional variants (members of this equivalence class)
-    consensus_chromatogram : Optional[Chromatogram]
-        Aggregated consensus chromatogram (if consensus mode used)
-    consensus_peaks : List[Peak]
-        Peaks detected on consensus signal
-    consensus_status : ConsensusStatus
-        Status of consensus processing
+    pooled_chromatogram : Optional[Chromatogram]
+        Aggregated pooled chromatogram (if pooled mode used)
+    pooled_peaks : List[Peak]
+        Peaks detected on pooled signal
+    pooling_status : PoolingStatus
+        Status of pooled processing
     correlation_min : Optional[float]
         Minimum pairwise correlation between variants
     fallback_reason : Optional[str]
@@ -67,7 +67,7 @@ class EquivalenceClass:
       - Transitive: A R B ∧ B R C ⟹ A R C
     - Same block support sequence = same chemical molecule at block granularity
     - Different positional block sequences = different synthesis paths
-    - Consensus mode is optional optimization (THEORY.md 4.2.2)
+    - Pooled mode is optional optimization (THEORY.md 4.2.2)
     - Automatic fallback to individual mode if correlation < threshold
 
     Examples
@@ -106,16 +106,16 @@ class EquivalenceClass:
     ----------
     THEORY.md Section 4.2.1: EquivalenceClass Definition
     THEORY.md Section 1.2: Chemical Identity vs Positional Identity
-    THEORY.md Section 4.2.2: Consensus Mode
-    THEORY.md Section 4.2.3: Hybrid Consensus Strategy
+    THEORY.md Section 4.2.2: Pooled Mode
+    THEORY.md Section 4.2.3: Hybrid Pooled Strategy
     THEORY.md Section 4.2.8: Validity Requirements
     """
 
     block_support_sequence: str
     members: Set[Compound] = field(default_factory=set)
-    consensus_chromatogram: Optional[Chromatogram] = None
-    consensus_peaks: List[Peak] = field(default_factory=list)
-    consensus_status: ConsensusStatus = ConsensusStatus.NOT_ATTEMPTED
+    pooled_chromatogram: Optional[Chromatogram] = None
+    pooled_peaks: List[Peak] = field(default_factory=list)
+    pooling_status: PoolingStatus = PoolingStatus.NOT_ATTEMPTED
     correlation_min: Optional[float] = None
     fallback_reason: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -204,20 +204,20 @@ class EquivalenceClass:
         return [c.positional_block_sequence for c in self.members]
 
     @property
-    def is_consensus_valid(self) -> bool:
+    def is_pooling_valid(self) -> bool:
         """
-        Check if consensus mode was successfully applied.
+        Check if pooled mode was successfully applied.
 
         Returns
         -------
         bool
-            True if consensus mode succeeded
+            True if pooled mode succeeded
 
         References
         ----------
         THEORY.md Section 4.2.8: Validity Requirements
         """
-        return self.consensus_status == ConsensusStatus.CONSENSUS_VALID
+        return self.pooling_status == PoolingStatus.POOLING_VALID
 
     @property
     def mean_purity(self) -> Optional[float]:

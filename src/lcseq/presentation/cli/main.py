@@ -62,7 +62,7 @@ def analyze(
         "individual",
         "--variant-mode",
         "-v",
-        help="Variant mode: 'individual' or 'consensus'",
+        help="Variant mode: 'individual' or 'pooled'",
     ),
     hierarchy_mode: str = typer.Option(
         "block",
@@ -99,8 +99,8 @@ def analyze(
         # With custom output directory
         lcseq analyze data.csv --library design.csv --output my_results/
 
-        # Using consensus mode
-        lcseq analyze data.csv --library design.csv --variant-mode consensus
+        # Using pooled mode
+        lcseq analyze data.csv --library design.csv --variant-mode pooled
 
         # With configuration file
         lcseq analyze data.csv --library design.csv --config custom.yaml
@@ -214,7 +214,7 @@ def info() -> None:
     console.print("  • Peak detection (Morse theory + persistent homology)")
     console.print("  • Peak classification (DAG constraints)")
     console.print("  • Synthesis validation (adaptive thresholds)")
-    console.print("  • Consensus mode (automatic fallback)")
+    console.print("  • Pooled mode (automatic fallback)")
     console.print("  • Hierarchical compound organization\n")
 
     console.print("[cyan]Supported Formats:[/cyan]")
@@ -228,7 +228,7 @@ def _get_default_config(
 ) -> AnalysisConfiguration:
     """Create default analysis configuration."""
     # Map string to enum
-    analysis_mode = AnalysisMode.INDIVIDUAL if variant_mode == "individual" else AnalysisMode.CONSENSUS
+    analysis_mode = AnalysisMode.INDIVIDUAL if variant_mode == "individual" else AnalysisMode.POOLED
     hierarchy = HierarchyMode.BUILDING_BLOCK if hierarchy_mode == "block" else HierarchyMode.MONOMER
 
     return AnalysisConfiguration(

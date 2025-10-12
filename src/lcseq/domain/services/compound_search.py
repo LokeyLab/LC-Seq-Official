@@ -40,8 +40,8 @@ class CompoundSearchService:
         """Find compound matching a given sequence.
 
         Searches for exact matches in:
-        1. Positional sequence (with building block positions)
-        2. Residue sequence (canonical, without nulls)
+        1. Positional block sequence (with building block positions)
+        2. Block support sequence (without nulls)
         3. Normalized sequences (AgxNull → Null)
 
         Parameters
@@ -67,17 +67,17 @@ class CompoundSearchService:
         sequence_parts = sequence.split("-")
 
         for compound in compounds:
-            # Check positional sequence (exact match)
-            if compound.positional_sequence == sequence:
+            # Check positional block sequence (exact match)
+            if compound.positional_block_sequence == sequence:
                 return compound
 
-            # Check residue sequence (canonical match)
-            if compound.residue_sequence == sequence:
+            # Check block support sequence (match without nulls)
+            if compound.block_support_sequence == sequence:
                 return compound
 
             # Check with null normalization
             if normalize_null:
-                cpd_parts = compound.positional_sequence.split("-")
+                cpd_parts = compound.positional_block_sequence.split("-")
                 if len(cpd_parts) == len(sequence_parts):
                     match = all(
                         p1 == p2

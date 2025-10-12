@@ -202,7 +202,7 @@ class ProcessChromatogramsWithIntegrationUseCase:
 
             # Step 3: Aggregate results
             results.append({
-                "sequence": compound.positional_sequence,
+                "sequence": compound.positional_block_sequence,
                 "n_peaks": len(peaks),
                 "total_area": total_area,
             })

@@ -8,6 +8,7 @@ from typing import List
 from ..entities.compound import Compound
 from ..entities.building_block import BuildingBlock
 from ..models.compound_hierarchy import CompoundHierarchy, HierarchyMode
+from .lineage_finder import LineageFinderService
 
 
 class HierarchyBuilder:
@@ -18,9 +19,11 @@ class HierarchyBuilder:
     and constructs the DAG structure. Supports both building-block
     and monomer modes.
 
+    Uses LineageFinderService for descendant logic (Single Source of Truth).
+
     Notes
     -----
-    - Stateless service (no instance state)
+    - Uses LineageFinderService for consistent descendant checking
     - Pure domain logic (no I/O operations)
     - Detects edges by comparing sequences
     - Validates DAG properties
@@ -56,6 +59,10 @@ class HierarchyBuilder:
     THEORY.md Section 1.5.2: Building-Block Level Truncation
     THEORY.md Section 1.5.3: Monomer-Level Truncation
     """
+
+    def __init__(self):
+        """Initialize HierarchyBuilder with LineageFinderService."""
+        self.lineage_finder = LineageFinderService()
 
     def build(
         self,
@@ -336,8 +343,8 @@ class HierarchyBuilder:
         THEORY.md Section 1.3: Monomer Mode (DAG with Convergence)
         """
         # Get monomer sequences as strings
-        ancestor_mono_str = ancestor.monomer_sequence
-        descendant_mono_str = descendant.monomer_sequence
+        ancestor_mono_str = ancestor.monomer_support_sequence
+        descendant_mono_str = descendant.monomer_support_sequence
 
         # Handle empty sequences
         if not ancestor_mono_str:
@@ -376,35 +383,19 @@ class HierarchyBuilder:
         """
         Check if descendant is a valid building-block truncation of ancestor (any level).
 
-        Allows multiple nullification steps (handles gaps in dataset).
+        Uses LineageFinderService for consistent block support subsequence logic.
+        This ensures equivalence classes (same block support) converge in the hierarchy.
+
+        Returns
+        -------
+        bool
+            True if descendant's block support sequence is a proper subsequence of ancestor's
+
+        Notes
+        -----
+        Delegates to LineageFinderService for Single Source of Truth.
         """
-        ancestor_blocks = ancestor.building_blocks
-        descendant_blocks = descendant.building_blocks
-
-        # Must have same number of positions
-        if len(ancestor_blocks) != len(descendant_blocks):
-            return False
-
-        # Check each position
-        for anc_block, desc_block in zip(ancestor_blocks, descendant_blocks):
-            # Must be same cycle
-            if anc_block.cycle != desc_block.cycle:
-                return False
-
-            # Check truncation validity
-            if anc_block.is_null and not desc_block.is_null:
-                # Ancestor is null but descendant is not - invalid
-                return False
-
-            if not anc_block.is_null and not desc_block.is_null:
-                # Both non-null - must be same block
-                if anc_block.code != desc_block.code:
-                    return False
-
-        # Valid if descendant has at least one more null than ancestor
-        anc_nulls = sum(1 for b in ancestor_blocks if b.is_null)
-        desc_nulls = sum(1 for b in descendant_blocks if b.is_null)
-        return desc_nulls > anc_nulls
+        return self.lineage_finder._is_building_block_descendant(descendant, ancestor)
 
     def _is_monomer_descendant(
         self,
@@ -414,36 +405,16 @@ class HierarchyBuilder:
         """
         Check if descendant is a valid monomer truncation of ancestor (any level).
 
-        Checks if descendant's monomer sequence is a subsequence of ancestor's
-        (allows multiple monomer removals for gaps in dataset).
+        Uses LineageFinderService for consistent monomer subsequence logic.
+        This ensures equivalence classes (same monomer sequence) converge in the hierarchy.
+
+        Returns
+        -------
+        bool
+            True if descendant's monomer sequence is a proper subsequence of ancestor's
+
+        Notes
+        -----
+        Delegates to LineageFinderService for Single Source of Truth.
         """
-        # Get monomer sequences
-        ancestor_mono_str = ancestor.monomer_sequence
-        descendant_mono_str = descendant.monomer_sequence
-
-        # Handle empty sequences
-        if not ancestor_mono_str:
-            return False
-        if not descendant_mono_str:
-            # Descendant has no monomers, ancestor has some - valid truncation
-            return True
-
-        # Split into monomer lists
-        ancestor_monomers = ancestor_mono_str.split("-")
-        descendant_monomers = descendant_mono_str.split("-")
-
-        # Descendant must have fewer monomers
-        if len(descendant_monomers) >= len(ancestor_monomers):
-            return False
-
-        # Check if descendant is a subsequence of ancestor (order-preserving)
-        anc_idx = 0
-        desc_idx = 0
-
-        while anc_idx < len(ancestor_monomers) and desc_idx < len(descendant_monomers):
-            if ancestor_monomers[anc_idx] == descendant_monomers[desc_idx]:
-                desc_idx += 1
-            anc_idx += 1
-
-        # Valid if all descendant monomers were matched in order
-        return desc_idx == len(descendant_monomers)
+        return self.lineage_finder._is_monomer_descendant(descendant, ancestor)

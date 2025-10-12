@@ -12,8 +12,8 @@ A complete Python package for analyzing chromatography data from DNA-encoded lib
 
 - 🔬 **Rigorous Peak Detection**: Morse theory + persistent homology for noise-robust peak identification
 - 📊 **Adaptive Validation**: Dataset-relative thresholds with Bayesian confidence assessment
-- 🌳 **Hierarchical Analysis**: DAG-based truncation analysis with automatic parent-child relationships
-- 🎯 **Consensus Mode**: Automatic aggregation of positional variants with fallback handling
+- 🌳 **Hierarchical Analysis**: DAG-based truncation analysis with automatic ancestor-descendant relationships
+- 🎯 **Pooled Mode**: Automatic aggregation of positional variants with fallback handling
 - 🏗️ **Clean Architecture**: Production-ready design with clear layer separation
 - 🔒 **Type-Safe**: Full type hints and static checking with mypy strict mode
 - ✅ **Well-Tested**: 590+ tests with 67% coverage (91% domain layer)
@@ -57,10 +57,10 @@ pip install -e ".[cli]"
 lcseq analyze data.csv --library design.csv --output results/
 
 # Use custom configuration
-lcseq analyze data.csv --library design.csv --config configs/strict.yaml
+lcseq analyze data.csv --library design.csv --config configs/default.yaml
 
-# Enable consensus mode for positional variants
-lcseq analyze data.csv --library design.csv --variant-mode consensus
+# Enable pooled mode for positional variants
+lcseq analyze data.csv --library design.csv --variant-mode pooled
 
 # Show capabilities
 lcseq info
@@ -117,12 +117,8 @@ LC-Seq-Official/
 │   ├── test_domain/        # Domain layer tests (584 tests)
 │   ├── test_integration/   # Integration tests
 │   └── fixtures/           # Test data
-├── configs/                # Configuration profiles
-│   ├── standard.yaml       # Default configuration
-│   ├── strict.yaml         # Strict validation
-│   ├── lenient.yaml        # Lenient thresholds
-│   ├── consensus.yaml      # Consensus mode
-│   └── monomer_mode.yaml   # Monomer hierarchy
+├── configs/                # Configuration
+│   └── default.yaml        # Single Source of Truth for all configuration
 ├── docs/                   # Documentation
 │   ├── THEORY.md           # Mathematical foundations (3,772 lines)
 │   ├── ARCHITECTURE.md     # Clean architecture guide
@@ -197,7 +193,7 @@ The package follows **Clean Architecture** (Hexagonal Architecture) principles:
 1. **Domain Layer**: Pure domain logic with zero external dependencies
    - Entities: `Compound`, `Chromatogram`, `Peak`, `BuildingBlock`
    - Algorithms: Morse theory peak detection, DAG-based classification
-   - Services: Hierarchy building, validation, consensus analysis
+   - Services: Hierarchy building, validation, pooled mode analysis
 
 2. **Application Layer**: Use cases and orchestration
    - Use cases coordinate domain services
@@ -229,7 +225,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for complete architectural sp
 **Phase 2: Synthesis Validation Layer** (3 modules)
 - ✅ BayesianValidator with prior probabilities
 - ✅ Adaptive validation with dataset-relative thresholds
-- ✅ Consensus validator for positional variants
+- ✅ Pooling validator for positional variants
 
 **Phase 3: Application Layer** (4 modules)
 - ✅ FullAnalysisPipeline orchestrating complete workflow
@@ -244,7 +240,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for complete architectural sp
 
 **Phase 5: Interface Layer** (CLI)
 - ✅ Typer-based CLI with rich formatting
-- ✅ Multiple configuration profiles (standard, strict, lenient, consensus, monomer)
+- ✅ Comprehensive YAML configuration (single source of truth)
 - ✅ Progress reporting and error handling
 - ✅ QUICKSTART.md comprehensive user guide
 
@@ -252,7 +248,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for complete architectural sp
 - **Total Code**: ~9,938 lines (domain + application + infrastructure)
 - **Total Tests**: 590+ tests with 67% overall coverage
 - **Domain Coverage**: 91% (high confidence in core logic)
-- **Configuration Profiles**: 5 pre-configured YAML files
+- **Configuration**: Single SSoT in configs/default.yaml
 - **Documentation**: 3,772 lines of theory + architecture + guides
 
 ### Deferred to v0.2.0

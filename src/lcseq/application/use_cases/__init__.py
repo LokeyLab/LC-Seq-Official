@@ -9,11 +9,11 @@ from .process_chromatograms import (
     ProcessChromatogramsWithIntegrationUseCase,
 )
 from .compute_global_scales import ComputeGlobalScalesUseCase
-from .process_chromatograms_consensus import ProcessChromatogramsConsensusUseCase
+from .process_pooled_chromatograms import ProcessPooledChromatogramsUseCase
 
 __all__ = [
     "ProcessChromatogramsUseCase",
     "ProcessChromatogramsWithIntegrationUseCase",
     "ComputeGlobalScalesUseCase",
-    "ProcessChromatogramsConsensusUseCase",
+    "ProcessPooledChromatogramsUseCase",
 ]

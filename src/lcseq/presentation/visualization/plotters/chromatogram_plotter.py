@@ -24,7 +24,7 @@ class ChromatogramPlotter(BasePlotter):
     - Time-series chromatogram data
     - Detected peaks with markers and labels
     - Multiple signal variants (raw, derivatives)
-    - Peak classifications (NULL, TRUNCATION, PRODUCT, UNKNOWN)
+    - Peak classifications (NULL, TRUNCATION, PUTATIVE_PRODUCT, UNKNOWN)
 
     Note: Baseline correction removed per THEORY.md - raw signals perform better.
     """

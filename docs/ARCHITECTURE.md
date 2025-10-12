@@ -107,7 +107,7 @@ domain/
     └── validation/
         ├── adaptive_validator.py
         ├── bayesian_validator.py
-        ├── consensus_validator.py
+        ├── pooling_validator.py
         └── validation_workflow.py
 ```
 
@@ -274,28 +274,68 @@ presentation/
 
 ## Configuration Strategy
 
-### YAML-Based Configuration
+### Single Source of Truth: `configs/default.yaml`
 
-All configuration externalized to YAML files (no hardcoded parameters).
+All configuration externalized to a single YAML file (no hardcoded parameters anywhere in codebase).
 
-**Configuration Profiles**:
+**Configuration Architecture**:
+
+```
+configs/default.yaml (Single Source of Truth)
+        ↓
+ConfigurationLoader.get_default_config()
+        ↓
+AnalysisConfiguration (domain model)
+        ↓
+config.py (thin wrapper for backward compatibility)
+        ↓
+Domain Services (via use cases)
+```
+
+**Configuration Structure**:
 
 ```yaml
-# configs/standard.yaml
+# configs/default.yaml - Single Source of Truth
 analysis:
-  variant_mode: individual # or "consensus"
-  hierarchy_mode: block # or "monomer"
+  variant_mode: individual  # or "pooled"
+  hierarchy_mode: building_block  # or "monomer"
 
 detection:
   min_persistence: 0.05
+  z_threshold: 3.0
+  prominence_percentile: 0.5
+  min_snr: 0.001
+  min_baseline_sds: 1.0
   boundary_method: valley_or_5pct
+  signal_variant: raw
+
+classification:
+  truncation_margin: 60.0
+  peak_matching_tolerance: 0.01
+  hungarian_min_threshold: 0.02
+
+pooling:
+  correlation_threshold: 0.8
+  aggregation_method: mean
 
 validation:
-  purity_threshold: auto # Use P₂₅ from dataset distribution
-  snr_threshold: auto # Use P₅₀ from dataset distribution
+  purity_threshold: auto  # Use P₂₅ from dataset distribution
+  snr_threshold: auto  # Use P₅₀ from dataset distribution
+
+visualization:
+  # All visualization parameters (layout, colors, fonts, dimensions)
+  layout:
+    seconds_per_minute: 60.0
+    offset_spacing: 0.5
+  # ... etc
 ```
 
-**Key Principle**: No magic numbers. All thresholds derived from data (THEORY.md Section 6.2).
+**Key Principles**:
+- **Single Source of Truth**: All parameters defined in `configs/default.yaml`
+- **No hardcoded defaults**: NO configuration values defined anywhere in code
+- **Config-driven behavior**: Examples and CLI use config to determine execution mode
+- **Override pattern**: CLI arguments can override config values
+- **Adaptive thresholds**: All thresholds derived from data (THEORY.md Section 6.2)
 
 ---
 
@@ -413,22 +453,22 @@ See [THEORY.md Section 1.5.1](THEORY.md#151-peptide-sequence-convention) for det
 4. Move `src_refactor/` → `src/`
 5. Archive legacy to `archive/src_legacy/`
 
-### Consensus Mode Design
+### Pooled Mode Design
 
-**Key Insight**: Consensus mode is an **optional optimization**, not required.
+**Key Insight**: Pooled mode is an **optional optimization**, not required.
 
 **Implementation** (THEORY.md Section 4.2):
 
-- Detect peaks on consensus signal (expensive, do once)
+- Detect peaks on pooled signal (expensive, do once)
 - Integrate areas on individual variants (cheap, do per-variant)
 - Automatic correlation check: min(r) > 0.8
 - Automatic fallback to individual mode if check fails
 
 **Status Flags**:
 
-- `CONSENSUS_VALID`: Correlation check passed
-- `HETEROGENEOUS`: Correlation check failed, used individual mode
-- `CONSENSUS_INVALID_BUT_SIMILAR`: Fallback successful
+- `POOLING_VALID`: Correlation check passed
+- `POOLING_INVALID`: Correlation check failed, used individual mode
+- `NOT_ATTEMPTED`: Single variant (no aggregation needed)
 
 See [THEORY.md Section 4.2.8.1](THEORY.md#4281-operational-fallback-workflow) for detailed workflow.
 

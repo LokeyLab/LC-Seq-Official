@@ -1,6 +1,6 @@
 # LC-Seq Examples
 
-This directory contains a single example script demonstrating lineage analysis.
+This directory contains the example script demonstrating config-driven lineage analysis.
 
 ## Key Principle
 
@@ -9,92 +9,195 @@ This directory contains a single example script demonstrating lineage analysis.
 - Calls domain services (orchestration)
 - Handles visualization (presentation)
 
-All algorithms (peak detection, hierarchy building) are in tested domain services (`src/lcseq/domain/services/`).
+All algorithms (peak detection, hierarchy building, pooling) are in tested domain services (`src/lcseq/domain/services/`).
 
-## Single Script
+## analyze.py - Unified Config-Driven Analysis
 
-**`analyze.py`** - Lineage analysis for reference compounds
+**Single script that handles all analysis modes based on configuration.**
+
+### Quick Start
 
 ```bash
-# Analyze reference compound and its descendants
+# Use default configuration (individual mode, monomer hierarchy)
 python examples/analyze.py --reference "Phe-DNvl-DPhe"
+
+# Override to pooled mode
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled
+
+# Use building-block hierarchy
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode building_block
+
+# Use custom configuration file
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --config my_config.yaml
 ```
 
 ---
 
-## Lineage Analysis
+## Configuration-Driven Design
 
-**THE canonical workflow for LC-Seq data analysis.**
+The script automatically loads **`configs/default.yaml`** (Single Source of Truth) and uses:
+- **`analysis.variant_mode`** - `individual` (default) or `pooled`
+- **`analysis.hierarchy_mode`** - `building_block` or `monomer` (default)
+- All detection, classification, pooling, and visualization parameters
 
-Per THEORY.md Section 3.1, the workflow analyzes a **reference compound** and its complete **lineage** (all descendants):
+CLI arguments override config values when provided.
+
+### To Change Defaults
+
+**Edit `configs/default.yaml`** - changes propagate everywhere automatically!
+
+```yaml
+analysis:
+  variant_mode: individual  # Change to pooled for ~3-10× speedup
+  hierarchy_mode: monomer   # or building_block
+
+detection:
+  min_persistence: 0.05  # Adjust peak detection sensitivity
+  z_threshold: 3.0
+  prominence_percentile: 0.5
+
+pooling:
+  correlation_threshold: 0.8  # Minimum correlation for valid pooling
+  aggregation_method: mean    # or median
+```
+
+---
+
+## Analysis Modes
+
+### Individual Mode (default)
+- Processes each compound variant separately
+- Full detail per variant
+- Standard workflow
+
+### Pooled Mode
+- Groups positional variants into equivalence classes
+- Detects peaks on pooled signal (mean/median)
+- Integrates areas on individual variants
+- **~3-10× speedup** for peak detection
+- Automatic fallback if correlation < 0.8
+- See THEORY.md Section 4.2
+
+**When to use pooled mode:**
+- Large datasets with many positional variants
+- Variants expected to have similar signals (high correlation)
+- Need faster processing without sacrificing purity measurements
+
+---
+
+## Hierarchy Modes
+
+### Monomer Mode (default, per THEORY.md)
+- DAG with convergence patterns
+- Based on chemical identity after monomer decomposition
+- More connections, richer structure
+- Recommended for most analyses
+
+### Building Block Mode
+- Poset (partial order) structure
+- Based on positional sequences
+- Simpler, tree-like structure
+- Useful for understanding sequence relationships
+
+---
+
+## Outputs
+
+The script generates:
+
+**Individual Mode:**
+```
+results/
+├── lineage_<sequence>.csv      # Peak counts per compound
+└── plots/
+    └── lineage_<sequence>.png  # Offset chromatogram plot
+```
+
+**Pooled Mode:**
+```
+results/
+├── lineage_pooled_<sequence>.csv       # Peak counts (1 per equivalence class)
+├── pooled_summary_<sequence>.csv       # Pooling statistics per class
+└── plots/
+    └── lineage_pooled_<sequence>.png   # Offset plot (1 trace per class)
+```
+
+---
+
+## Command-Line Options
+
+```
+--reference TEXT         Reference compound sequence (required)
+                        Example: "Phe-DNvl-DPhe"
+
+--variant-mode CHOICE   Override analysis mode from config
+                        individual: Process each variant separately
+                        pooled: Aggregate variants (~3-10× speedup)
+
+--hierarchy-mode CHOICE Override hierarchy mode from config
+                        monomer: DAG with convergence (default)
+                        building_block: Poset structure
+
+--config PATH           Configuration file (default: configs/default.yaml)
+
+--data PATH             HDF5 data file (default: test_data/processed_data.h5)
+
+--output PATH           Output directory (default: results/)
+```
+
+---
+
+## Lineage Analysis Workflow
+
+Per THEORY.md Section 3.1, the workflow analyzes a **reference compound** and its complete **lineage**:
 
 1. **User specifies a reference compound** (e.g., "Phe-DNvl-DPhe")
 2. **System finds the lineage** (reference + all descendants)
-3. **Processes all members** (peak detection on raw signals)
-4. **Generates offset chromatogram plot** (stacked vertically)
+3. **Builds hierarchy** (monomer DAG or building-block poset)
+4. **Processes all members** (peak detection ± pooling)
+5. **Generates offset chromatogram plot** (stacked vertically)
+6. **Exports results** (CSV + plots)
 
 ### Terminology (per THEORY.md Section 3.1)
 
 **Use these terms:**
 - ✅ **Reference Compound** - The compound currently being analyzed
-- ✅ **Lineage** - All ancestors + descendants + self
+- ✅ **Lineage** - All ancestors + descendants + self (Principal Ideal ↓X)
 - ✅ **Descendant** - Compound with fewer building blocks
 - ✅ **Ancestor** - Compound with more building blocks
 
 **Do NOT use:**
 - ❌ "Parent" (ambiguous in combinatorial libraries)
 - ❌ "Child" (relative, not absolute)
-- ❌ "Family" (not defined in THEORY.md)
 
-### Usage Examples
+---
 
-```bash
-# Basic usage (monomer hierarchy mode - default per THEORY.md)
-python examples/analyze.py --reference "Phe-DNvl-DPhe"
+## Architecture
 
-# Use building-block hierarchy (poset structure)
-python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode building_block
-
-# Custom data file
-python examples/analyze.py --reference "Leu-Pro-Ala" --data my_data.h5
-```
-
-### Features
-
-**Analysis:**
-- ✅ Finds all descendants of reference compound
-- ✅ Builds hierarchy (monomer DAG or building-block poset)
-- ✅ Processes chromatograms with peak detection
-- ✅ Generates offset chromatogram plots
-
-**Architecture:**
-- ❌ NO business logic in script
-- ✅ Only orchestrates domain services (PeakDetector, HierarchyBuilder, LineageFinderService)
-- ✅ Visualization is presentation concern (not domain)
-
-### Output
+### Clean Architecture Compliance
 
 ```
-examples/lineage_results/
-├── lineage_<sequence>.csv      # Peak counts per compound
-└── plots/
-    └── lineage_<sequence>.png  # Offset chromatogram plot
+Example Script (Presentation Layer)
+    ↓ loads config from
+configs/default.yaml (Infrastructure)
+    ↓ calls
+Domain Services (Domain Layer)
+    ↓ operates on
+Domain Entities (Domain Layer)
 ```
 
-### Command-Line Options
+**What's in the Example Script:**
+- ✅ Configuration loading (infrastructure)
+- ✅ Data loading (infrastructure: HDF5)
+- ✅ Orchestration (calling domain services in sequence)
+- ✅ Presentation (plotting, visualization)
 
-```
---reference TEXT         Reference compound sequence (required)
-                        Example: "Phe-DNvl-DPhe"
+**What's NOT in the Example Script:**
+- ❌ Domain Logic (peak detection, pooling algorithms)
+- ❌ Business Rules (validation criteria, classification logic)
+- ❌ Hardcoded parameters (everything comes from config)
 
---hierarchy-mode CHOICE  Hierarchy mode: monomer (default) or building_block
-                        monomer: DAG with convergence (per THEORY.md)
-                        building_block: Poset structure
-
---data PATH             HDF5 data file (default: test_data/processed_data.h5)
-
---output PATH           Output directory (default: examples/lineage_results)
-```
+All algorithms are in `src/lcseq/domain/services/` with comprehensive test coverage.
 
 ---
 
@@ -109,55 +212,41 @@ python examples/analyze.py --reference "INVALID"
 
 ---
 
-## Architecture
+## Examples
 
-### Clean Architecture Compliance
+### Basic Usage
 
-```
-Example Script (Presentation Layer)
-    ↓ calls
-Domain Services (Domain Layer)
-    ↓ operates on
-Domain Entities (Domain Layer)
+```bash
+# Default: individual mode, monomer hierarchy
+python examples/analyze.py --reference "Leu-LA03-Pro-Leu-DLeuMe-DPro-Leu-Leu-DPro"
 ```
 
-**What's in the Example Script:**
-- ✅ Infrastructure: Loading HDF5 data
-- ✅ Orchestration: Calling domain services in sequence
-- ✅ Presentation: Plotting, visualization
+### Pooled Mode
 
-**What's NOT in the Example Script:**
-- ❌ Domain Logic: Peak detection algorithms
-- ❌ Business Rules: Validation criteria, classification logic
-
-All algorithms are in `src/lcseq/domain/services/` with 607 passing tests.
-
----
-
-## Customization
-
-### Change Detection Threshold
-
-Edit `analyze.py` and search for `persistence_threshold`:
-
-```python
-persistence_threshold=0.05  # → 0.10 for stricter detection
+```bash
+# Enable pooled mode for faster processing
+python examples/analyze.py \
+  --reference "Leu-LA03-Pro-Leu-DLeuMe-DPro-Leu-Leu-DPro" \
+  --variant-mode pooled
 ```
 
----
+### Building-Block Hierarchy
 
-## Typical Workflow
+```bash
+# Use building-block hierarchy instead of monomer
+python examples/analyze.py \
+  --reference "Phe-DNvl-DPhe" \
+  --hierarchy-mode building_block
+```
 
-1. **Choose a reference sequence** you want to analyze
-2. **Run lineage analysis:**
-   ```bash
-   python examples/analyze.py --reference "YourSequence"
-   ```
-3. **Check the plots** in `examples/lineage_results/plots/`
-4. **Review the CSV** for peak counts
-5. **Adjust if needed:**
-   - Try different hierarchy mode: `--hierarchy-mode building_block`
-   - Try different reference: `--reference "NewSequence"`
+### Custom Configuration
+
+```bash
+# Use custom config file (overrides defaults)
+python examples/analyze.py \
+  --reference "Phe-DNvl-DPhe" \
+  --config my_custom_config.yaml
+```
 
 ---
 
@@ -180,11 +269,23 @@ persistence_threshold=0.05  # → 0.10 for stricter detection
 - Descendants not in dataset
 - Sequence has no natural truncations
 
+### Low correlation warnings (pooled mode)
+
+**Problem:** Many equivalence classes have low correlation (< 0.8).
+
+**Solutions:**
+- This is expected when variants have different signals
+- System automatically handles this (no action needed)
+- Consider using individual mode if most classes have low correlation
+
 ---
 
 ## Questions?
 
 See:
 - `docs/QUICKSTART.md` - Full user guide
-- `docs/THEORY.md` - Mathematical foundations (Section 3.1 for terminology)
+- `docs/THEORY.md` - Mathematical foundations
+  - Section 3.1: Lineage terminology
+  - Section 4.2: Pooled mode
 - `docs/ARCHITECTURE.md` - System design
+- `configs/default.yaml` - Single Source of Truth for all parameters

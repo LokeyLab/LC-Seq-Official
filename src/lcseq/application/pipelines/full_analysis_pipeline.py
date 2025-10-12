@@ -293,7 +293,7 @@ class FullAnalysisPipeline:
 
             result = CompoundResult(
                 compound_id=compound_id,
-                sequence=str(compound.positional_sequence),
+                sequence=str(compound.positional_block_sequence),
                 level=compound.level,
                 validation_status=str(vr.get('validation_status', 'NOT_VALIDATED')),
                 purity=vr.get('purity', 0.0),

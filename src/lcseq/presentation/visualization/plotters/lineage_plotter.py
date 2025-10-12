@@ -110,9 +110,9 @@ class LineageOffsetPlotter(BasePlotter):
         """
         # Sort by level (maximal → minimal, THEORY.md Section 3.3)
         # Use appropriate level attribute based on mode
-        # Secondary sort by canonical sequence to group chemically identical compounds
+        # Secondary sort by block support sequence to group chemically identical compounds
         level_attr = "monomer_level" if hierarchy_mode == HierarchyMode.MONOMER else "level"
-        lineage_sorted = sorted(lineage, key=lambda c: (-getattr(c, level_attr), c.residue_sequence))
+        lineage_sorted = sorted(lineage, key=lambda c: (-getattr(c, level_attr), c.block_support_sequence))
 
         # Assign colors (presentation concern)
         # Colors grouped by level for visual clarity
@@ -133,21 +133,21 @@ class LineageOffsetPlotter(BasePlotter):
         ref_time = alignment_reference.chromatogram.time_points
         label_x_right = (ref_time[-1] / VisualizationConfig.SECONDS_PER_MINUTE) + 1.0
 
-        # Calculate offsets with extra spacing between canonical sequence groups
+        # Calculate offsets with extra spacing between block support sequence groups
         offsets = []
-        prev_canonical = None
+        prev_block_support = None
         cumulative_offset = 0.0
 
         for compound in lineage_sorted:
-            canonical = compound.residue_sequence
+            block_support = compound.block_support_sequence
 
-            # Add extra space when transitioning to a new canonical sequence group
-            if prev_canonical is not None and canonical != prev_canonical:
+            # Add extra space when transitioning to a new block support sequence group
+            if prev_block_support is not None and block_support != prev_block_support:
                 cumulative_offset += VisualizationConfig.GROUP_SPACING_EXTRA
 
             offsets.append(cumulative_offset)
             cumulative_offset += VisualizationConfig.OFFSET_SPACING
-            prev_canonical = canonical
+            prev_block_support = block_support
 
         # Plot each compound
         # Z-order: maximal (bottom of plot, index 0) should be on top
@@ -180,15 +180,15 @@ class LineageOffsetPlotter(BasePlotter):
         hierarchy_mode: HierarchyMode = HierarchyMode.MONOMER
     ) -> Dict[str, str]:
         """
-        Assign colors to chemically identical compounds (same canonical sequence).
+        Assign colors to chemically identical compounds (same block support sequence).
 
-        All positional isomers (same canonical/residue sequence) get the same color.
+        All positional isomers (same block support sequence) get the same color.
         Colors are assigned using a rainbow colormap, organized by level groups so that
         compounds at the same level get similar colors from the same region of the
         color spectrum. Reference and null compounds are always black.
 
         Color mode controlled by VisualizationConfig.USE_COLORMAP:
-        - True: Rainbow colormap by canonical sequence, organized by level
+        - True: Rainbow colormap by block support sequence, organized by level
         - False: All black (publication-ready)
 
         Parameters
@@ -203,28 +203,28 @@ class LineageOffsetPlotter(BasePlotter):
         Returns
         -------
         Dict[str, str]
-            Mapping from positional_sequence to hex color
+            Mapping from positional_block_sequence to hex color
         """
         # Check if colormap is enabled
         if not VisualizationConfig.USE_COLORMAP:
             # All black mode
-            return {compound.positional_sequence: "black" for compound in compounds}
+            return {compound.positional_block_sequence: "black" for compound in compounds}
 
         # Determine level attribute based on hierarchy mode
         level_attr = "monomer_level" if hierarchy_mode == HierarchyMode.MONOMER else "level"
 
-        # Group by level, then by canonical sequence within each level
+        # Group by level, then by block support sequence within each level
         level_groups: Dict[int, Dict[str, List[Compound]]] = {}
 
         for compound in compounds:
             level = getattr(compound, level_attr)
-            canonical = compound.residue_sequence
+            block_support = compound.block_support_sequence
 
             if level not in level_groups:
                 level_groups[level] = {}
-            if canonical not in level_groups[level]:
-                level_groups[level][canonical] = []
-            level_groups[level][canonical].append(compound)
+            if block_support not in level_groups[level]:
+                level_groups[level][block_support] = []
+            level_groups[level][block_support].append(compound)
 
         # Sort levels (descending: maximal to minimal)
         sorted_levels = sorted(level_groups.keys(), reverse=True)
@@ -236,41 +236,41 @@ class LineageOffsetPlotter(BasePlotter):
 
         # Build color mapping
         color_map: Dict[str, str] = {}
-        reference_canonical = reference.residue_sequence if reference else None
+        reference_block_support = reference.block_support_sequence if reference else None
 
         for level_idx, level in enumerate(sorted_levels):
-            canonical_seqs = sorted(level_groups[level].keys())
-            n_canonical_at_level = len(canonical_seqs)
+            block_support_seqs = sorted(level_groups[level].keys())
+            n_block_support_at_level = len(block_support_seqs)
 
             # Calculate color range for this level
             # Each level gets an equal chunk of the rainbow spectrum
             level_start = level_idx / n_levels
             level_end = (level_idx + 1) / n_levels
 
-            # Generate colors for this level's canonical sequences
-            if n_canonical_at_level == 1:
-                # Single canonical sequence - use midpoint of level's color range
+            # Generate colors for this level's block support sequences
+            if n_block_support_at_level == 1:
+                # Single block support sequence - use midpoint of level's color range
                 level_colors = [cmap((level_start + level_end) / 2)]
             else:
                 # Multiple sequences - spread across level's color range
-                level_colors = [cmap(level_start + (i / (n_canonical_at_level - 1)) * (level_end - level_start))
-                               for i in range(n_canonical_at_level)]
+                level_colors = [cmap(level_start + (i / (n_block_support_at_level - 1)) * (level_end - level_start))
+                               for i in range(n_block_support_at_level)]
 
-            # Assign colors to canonical sequences at this level
-            for canonical_idx, canonical in enumerate(canonical_seqs):
-                is_reference_canonical = canonical == reference_canonical
-                is_null = canonical == ""
+            # Assign colors to block support sequences at this level
+            for block_support_idx, block_support in enumerate(block_support_seqs):
+                is_reference_block_support = block_support == reference_block_support
+                is_null = block_support == ""
 
-                if is_reference_canonical or is_null:
+                if is_reference_block_support or is_null:
                     color = "black"
                 else:
                     # Convert RGBA to hex
-                    rgba = level_colors[canonical_idx]
+                    rgba = level_colors[block_support_idx]
                     color = f"#{int(rgba[0]*255):02x}{int(rgba[1]*255):02x}{int(rgba[2]*255):02x}"
 
                 # Assign same color to all positional variants
-                for compound in level_groups[level][canonical]:
-                    color_map[compound.positional_sequence] = color
+                for compound in level_groups[level][block_support]:
+                    color_map[compound.positional_block_sequence] = color
 
         return color_map
 
@@ -359,7 +359,7 @@ class LineageOffsetPlotter(BasePlotter):
             normalized_snr_threshold = np.zeros_like(raw_signal)
 
         # Get color and styling
-        color = color_map.get(compound.positional_sequence, "gray")
+        color = color_map.get(compound.positional_block_sequence, "gray")
         is_reference = compound == reference
         linewidth = VisualizationConfig.LINEWIDTH_REFERENCE if is_reference else VisualizationConfig.LINEWIDTH_DEFAULT
 
@@ -552,12 +552,22 @@ class LineageOffsetPlotter(BasePlotter):
             )
 
         # Add validation indicator on left side
-        # Green check if putative product found, red X if not
-        has_product = (compound.selected_peak is not None and
-                      compound.selected_peak.peak_type == PeakType.PUTATIVE_PRODUCT)
+        # Green check if expected peak found:
+        #   - For L0 (null compound): NULL peak is expected
+        #   - For others: PUTATIVE_PRODUCT peak is expected
+        is_null_compound = compound.is_null_compound
+        has_expected_peak = False
 
-        indicator = "✓" if has_product else "✗"
-        indicator_color = "green" if has_product else "red"
+        if compound.selected_peak is not None:
+            if is_null_compound:
+                # L0 compound: NULL peak is the expected signal (DNA tag only)
+                has_expected_peak = compound.selected_peak.peak_type == PeakType.NULL
+            else:
+                # Non-null compound: PUTATIVE_PRODUCT is expected
+                has_expected_peak = compound.selected_peak.peak_type == PeakType.PUTATIVE_PRODUCT
+
+        indicator = "✓" if has_expected_peak else "✗"
+        indicator_color = "green" if has_expected_peak else "red"
 
         # Position indicator to the left of the signal start
         indicator_x = time_minutes[0] - 0.5
@@ -713,11 +723,11 @@ class LineageOffsetPlotter(BasePlotter):
 
     def _align_building_blocks(self, compound: Compound, reference: Compound) -> str:
         """
-        Align building blocks by synthesis position.
+        Align building blocks by block support sequence (subsequence matching).
 
-        Each position in compound aligns to same position in reference.
-        AgxNull becomes gap (dashes matching reference residue length).
-        No spaces in output - positions joined with "-".
+        In building block mode, alignment is based on non-null blocks only.
+        Uses greedy left-to-right subsequence matching to find which reference
+        blocks are present in the compound. Missing blocks become gaps.
 
         Parameters
         ----------
@@ -729,29 +739,50 @@ class LineageOffsetPlotter(BasePlotter):
         Returns
         -------
         str
-            Position-aligned sequence with gaps (e.g., "---DNvl-DPhe")
+            Block-support-aligned sequence with gaps for missing blocks
 
         Examples
         --------
-        >>> # Reference: Phe-DNvl-DPhe
-        >>> # Compound:  AgxNull-DNvl-DPhe
+        >>> # Reference support: Leu-LA03-Pro-Leu-DLeuMe-DPro (3 blocks)
+        >>> # Compound support:  Leu----------Leu-DLeuMe-DPro (2 blocks, missing LA03-Pro)
         >>> aligned = _align_building_blocks(compound, reference)
         >>> aligned
-        '---DNvl-DPhe'  # "---" matches "Phe" length (3 chars)
-        """
-        # Split sequences into building blocks
-        compound_blocks = compound.positional_sequence.split("-")
-        reference_blocks = reference.positional_sequence.split("-")
+        'Leu----------Leu-DLeuMe-DPro'  # Gap matches "LA03-Pro" length (10 chars including hyphen)
 
-        # Align each position
+        Notes
+        -----
+        This aligns by block support sequence (non-null blocks), NOT by synthesis
+        position. Positions are ignored in building block mode.
+        """
+        # Get block support sequences (non-null blocks only)
+        compound_support_blocks = [bb.code for bb in reversed(compound.building_blocks) if not bb.is_null]
+        reference_support_blocks = [bb.code for bb in reversed(reference.building_blocks) if not bb.is_null]
+
+        # Handle all-null case
+        if not compound_support_blocks:
+            # All gaps - total length should match reference support
+            total_length = sum(len(bb) for bb in reference_support_blocks) + len(reference_support_blocks) - 1
+            return "-" * total_length
+
+        # Use greedy left-to-right subsequence matching (same logic as lineage finder)
+        # Find which reference blocks are present in compound
+        ref_idx = 0
+        compound_idx = 0
         aligned = []
-        for cpd_bb, ref_bb in zip(compound_blocks, reference_blocks):
-            if "AgxNull" in cpd_bb or cpd_bb == "Null":
-                # Replace null with dashes matching reference residue length
-                aligned.append("-" * len(ref_bb))
+
+        while ref_idx < len(reference_support_blocks):
+            ref_block = reference_support_blocks[ref_idx]
+
+            # Check if current compound block matches this reference block
+            if compound_idx < len(compound_support_blocks) and compound_support_blocks[compound_idx] == ref_block:
+                # Match found - add the block
+                aligned.append(ref_block)
+                compound_idx += 1
             else:
-                # Keep non-null residue as-is
-                aligned.append(cpd_bb)
+                # No match - add gap with length matching reference block
+                aligned.append("-" * len(ref_block))
+
+            ref_idx += 1
 
         return "-".join(aligned)
 
@@ -849,7 +880,7 @@ class LineageOffsetPlotter(BasePlotter):
         ax.set_xlabel("Time (minutes)", fontsize=12, fontweight="bold", color="black")
 
         # Generate title (black text)
-        reference_label = reference.residue_sequence if reference else lineage_sorted[-1].residue_sequence
+        reference_label = reference.block_support_sequence if reference else lineage_sorted[-1].block_support_sequence
         ax.set_title(
             f"Lineage Analysis - {reference_label} (n={n_compounds})",
             fontsize=14,

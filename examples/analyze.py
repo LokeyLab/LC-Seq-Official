@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""LC-Seq Analysis - Lineage analysis for reference compounds.
+"""LC-Seq Lineage Analysis - Config-driven analysis for reference compounds.
 
-This script contains NO business logic - it only orchestrates domain services
-and handles visualization (a presentation concern, not domain logic).
+Analyzes a reference compound and its complete lineage using configuration from
+configs/default.yaml to determine analysis mode (individual vs pooled), hierarchy
+mode, and all parameters.
 
-Analyzes a reference compound and its complete lineage (ancestors + descendants).
+Analysis Modes (from config):
+  individual - Process each variant separately (default)
+  pooled     - Aggregate positional variants for ~3-10× speedup
 
-Hierarchy Modes:
+Hierarchy Modes (from config):
   building_block - Poset structure based on positional sequences
-  monomer        - DAG with convergence based on chemical identity (default, per THEORY.md)
+  monomer        - DAG with convergence based on chemical identity
 
 Usage:
-    # Analyze reference compound with its lineage
+    # Use default configuration (configs/default.yaml)
     python examples/analyze.py --reference "Phe-DNvl-DPhe"
 
-    # Use building-block hierarchy mode
+    # Override configuration file
+    python examples/analyze.py --reference "Phe-DNvl-DPhe" --config my_config.yaml
+
+    # Override specific parameters
+    python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled
     python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode building_block
 """
 
@@ -29,20 +36,33 @@ from lcseq.domain.services import (
     CompoundSearchService,
     LineageFinderService,
 )
-from lcseq.domain.models import HierarchyMode
-from lcseq.application.use_cases import ProcessChromatogramsUseCase
+from lcseq.domain.models import HierarchyMode, AnalysisMode, PoolingStatus
+from lcseq.application.use_cases import (
+    ProcessChromatogramsUseCase,
+    ProcessPooledChromatogramsUseCase,
+)
 from lcseq.presentation.visualization.plotters import LineageOffsetPlotter
-from lcseq.infrastructure import HDF5CompoundLoader
+from lcseq.infrastructure import HDF5CompoundLoader, JSONExporter
+from lcseq.infrastructure.configuration.yaml_loader import ConfigurationLoader
 
 
-def analyze_lineage(args):
-    """Analyze reference compound and its complete lineage (ancestors + descendants)."""
+def analyze_lineage(args, config):
+    """Analyze reference compound and its lineage using configuration."""
+
+    # Determine mode from config (can be overridden by args)
+    variant_mode = args.variant_mode or config.analysis_mode
+    hierarchy_mode = args.hierarchy_mode or config.hierarchy_mode
+
+    mode_name = "Pooled" if variant_mode == AnalysisMode.POOLED else "Individual"
+
     print("=" * 80)
-    print("LC-Seq Lineage Analysis")
+    print(f"LC-Seq Lineage Analysis ({mode_name} Mode)")
     print("=" * 80)
     print(f"\nReference Compound: {args.reference}")
     print(f"Data: {args.data}")
     print(f"Output: {args.output}")
+    print(f"Analysis Mode: {variant_mode.value} (from {'CLI' if args.variant_mode else 'config'})")
+    print(f"Hierarchy Mode: {hierarchy_mode.value} (from {'CLI' if args.hierarchy_mode else 'config'})")
 
     args.output.mkdir(exist_ok=True, parents=True)
     plots_dir = args.output / "plots"
@@ -54,8 +74,9 @@ def analyze_lineage(args):
     print("=" * 80)
     loader = HDF5CompoundLoader()
     compounds = loader.load_all(args.data)
+    print(f"✓ Loaded {len(compounds):,} compounds")
 
-    # STEP 2: Find reference compound (using domain service)
+    # STEP 2: Find reference compound
     print("\n" + "=" * 80)
     print("STEP 2: Find Reference Compound")
     print("=" * 80)
@@ -66,143 +87,212 @@ def analyze_lineage(args):
         print(f"\n❌ ERROR: Reference compound '{args.reference}' not found!")
         print("\nAvailable sequences (first 20):")
         for i, cpd in enumerate(compounds[:20]):
-            print(f"  {i+1}. {cpd.positional_sequence}")
+            print(f"  {i+1}. {cpd.positional_block_sequence}")
         sys.exit(1)
 
-    print(f"✓ Found: {reference.positional_sequence}")
-    print(f"  Canonical Sequence: {reference.residue_sequence}")
+    print(f"✓ Found: {reference.positional_block_sequence}")
+    print(f"  Block Support Sequence: {reference.block_support_sequence}")
 
-    # Display correct level based on hierarchy mode (THEORY.md Section 3.3)
-    if args.hierarchy_mode == "building_block":
+    # Display correct level based on hierarchy mode
+    if hierarchy_mode == HierarchyMode.BUILDING_BLOCK:
         print(f"  Level: {reference.level} (Block Mode)")
-    else:  # monomer
+    else:
         print(f"  Level: {reference.monomer_level} (Monomer Mode)")
 
-    # STEP 3: Find lineage directly (Principal Ideal ↓X)
+    # STEP 3: Find lineage
     print("\n" + "=" * 80)
     print("STEP 3: Find Lineage (Principal Ideal ↓X)")
     print("=" * 80)
     print(f"Scanning {len(compounds):,} compounds to find lineage members...")
     lineage_finder = LineageFinderService()
-    lineage = lineage_finder.find_principal_ideal(reference, compounds, args.hierarchy_mode_enum)
+    lineage = lineage_finder.find_principal_ideal(reference, compounds, hierarchy_mode)
     print(f"✓ Found: {len(lineage)} compounds (reference + {len(lineage)-1} descendants)")
     print(f"  Reduction: {len(compounds):,} → {len(lineage)} ({100*len(lineage)/len(compounds):.2f}%)")
 
-    # STEP 4: Build minimal hierarchy (lineage only)
+    # STEP 4: Build hierarchy
     print("\n" + "=" * 80)
     print("STEP 4: Build Minimal Hierarchy")
     print("=" * 80)
     print(f"Building hierarchy for lineage ({len(lineage)} compounds)...")
-    print(f"  Mode: {args.hierarchy_mode}")
+    print(f"  Mode: {hierarchy_mode.value}")
     builder = HierarchyBuilder()
-    hierarchy = builder.build(lineage, args.hierarchy_mode_enum)
+    hierarchy = builder.build(lineage, hierarchy_mode)
     print(f"✓ Built: {hierarchy.size():,} compounds, {hierarchy.edge_count():,} edges")
 
-    # Show structure (using domain service to group by level)
-    use_monomer_level = args.hierarchy_mode == "monomer"
+    # Show structure
+    use_monomer_level = hierarchy_mode == HierarchyMode.MONOMER
     by_level = lineage_finder.group_lineage_by_level(lineage, use_monomer_level=use_monomer_level)
     mode_label = "Monomer Mode" if use_monomer_level else "Block Mode"
     print(f"\n  Structure ({mode_label} levels):")
     for level in sorted(by_level.keys(), reverse=True):
         print(f"    Level {level}: {len(by_level[level])} compounds")
 
-    # STEP 5: Process chromatograms (using application layer use case)
+    # STEP 5: Process chromatograms (mode-dependent)
     print("\n" + "=" * 80)
     print("STEP 5: Process Chromatograms")
     print("=" * 80)
-    print("Detecting peaks using Discrete Morse Theory + Poisson statistics...")
-    process_use_case = ProcessChromatogramsUseCase()
-    peaks_dict = process_use_case.execute(
-        compounds=lineage,
-        hierarchy=hierarchy,
-        # All parameters use defaults from config
-    )
 
-    total_peaks = sum(len(peaks) for peaks in peaks_dict.values())
-    print(f"✓ Processed: {len(lineage)} compounds")
-    print(f"  Peaks: {total_peaks} total, {total_peaks/len(lineage):.1f} avg/compound")
+    if variant_mode == AnalysisMode.POOLED:
+        print("Using hybrid pooled strategy (THEORY.md Section 4.2.3):")
+        print("  Phase 1: Peak detection on pooled signal (expensive, once per class)")
+        print("  Phase 2: Area integration on variants (cheap, per variant)")
 
-    # STEP 6: Generate plot (using presentation layer)
+        process_use_case = ProcessPooledChromatogramsUseCase()
+        equivalence_classes, processed_compounds, used_hierarchy = process_use_case.execute(
+            compounds=lineage,
+            hierarchy=hierarchy,
+        )
+
+        # Build peaks_dict for plotting
+        peaks_dict = {}
+        for compound in used_hierarchy.compounds:
+            peaks_dict[compound] = compound.detected_peaks
+
+        total_peaks = sum(len(cpd.detected_peaks) for cpd in processed_compounds)
+        n_classes = len(equivalence_classes)
+        n_variants = sum(len(eq.members) for eq in equivalence_classes.values())
+
+        print(f"✓ Processed: {n_classes} equivalence classes ({n_variants} variants)")
+        print(f"  Peaks: {total_peaks} total")
+        print(f"  Traces: {len(processed_compounds)} (1 per equivalence class)")
+
+        # Report correlation warnings
+        low_corr_classes = [
+            eq for eq in equivalence_classes.values()
+            if eq.pooling_status == PoolingStatus.POOLING_INVALID
+        ]
+        if low_corr_classes:
+            print(f"  ⚠ Warning: {len(low_corr_classes)} classes have low correlation")
+    else:
+        # Individual mode
+        print("Detecting peaks using Discrete Morse Theory + Poisson statistics...")
+
+        process_use_case = ProcessChromatogramsUseCase()
+        peaks_dict = process_use_case.execute(
+            compounds=lineage,
+            hierarchy=hierarchy,
+        )
+
+        processed_compounds = lineage
+        used_hierarchy = hierarchy
+        equivalence_classes = None  # Not used in individual mode
+
+        total_peaks = sum(len(peaks) for peaks in peaks_dict.values())
+        print(f"✓ Processed: {len(lineage)} compounds")
+        print(f"  Peaks: {total_peaks} total, {total_peaks/len(lineage):.1f} avg/compound")
+
+    # STEP 6: Generate plot
     print("\n" + "=" * 80)
     print("STEP 6: Generate Plot")
     print("=" * 80)
-    plot_path = plots_dir / f"lineage_{reference.residue_sequence}.png"
+
+    # Build file suffix with both variant mode and hierarchy mode
+    variant_suffix = "_pooled" if variant_mode == AnalysisMode.POOLED else ""
+    hierarchy_suffix = "_block" if hierarchy_mode == HierarchyMode.BUILDING_BLOCK else "_monomer"
+    mode_suffix = f"{variant_suffix}{hierarchy_suffix}"
+
+    plot_path = plots_dir / f"lineage{mode_suffix}_{reference.block_support_sequence}.png"
+
     plotter = LineageOffsetPlotter()
     plotter.plot(
-        lineage,
+        processed_compounds,
         peaks_dict,
         output_path=plot_path,
+        reference=reference if variant_mode == AnalysisMode.INDIVIDUAL else reference,
+        hierarchy_mode=hierarchy_mode,
+        hierarchy=used_hierarchy,
+    )
+    print(f"✓ Plot saved: {plot_path.name}")
+
+    # STEP 7: Export results
+    print("\n" + "=" * 80)
+    print("STEP 7: Export Results")
+    print("=" * 80)
+
+    # Export comprehensive JSON with all analysis data
+    json_exporter = JSONExporter()
+    json_path = args.output / f"analysis{mode_suffix}_{reference.block_support_sequence}.json"
+
+    json_exporter.export(
         reference=reference,
-        hierarchy_mode=args.hierarchy_mode_enum,
-        hierarchy=hierarchy,  # Enable dashed lines for truncation regions
-        # min_baseline_sds uses default from config
+        lineage=lineage,
+        hierarchy=used_hierarchy,
+        peaks_dict=peaks_dict,
+        output_path=json_path,
+        variant_mode=variant_mode,
+        hierarchy_mode=hierarchy_mode,
+        equivalence_classes=equivalence_classes,
+        data_file=args.data,
+        total_library_size=len(compounds),
     )
 
-    # Export CSV (sorted to match visualization order)
-    csv_path = args.output / f"lineage_{reference.residue_sequence}.csv"
-    with open(csv_path, "w") as f:
-        # Header with mode-specific level name (THEORY.md Section 3.3)
-        level_attr = "monomer_level" if use_monomer_level else "level"
-        level_label = "monomer_level" if use_monomer_level else "block_level"
-        f.write(f"sequence,{level_label},n_peaks\n")
+    print(f"✓ Comprehensive JSON exported: {json_path.name}")
+    print(f"  Contains: metadata, hierarchy, compounds, peaks, statistics")
 
-        # Sort lineage same way as visualization (maximal→minimal, grouped by canonical sequence)
-        lineage_sorted = sorted(lineage, key=lambda c: (-getattr(c, level_attr), c.residue_sequence))
+    if variant_mode == AnalysisMode.POOLED and equivalence_classes:
+        print(f"  + equivalence classes data")
 
-        for cpd in lineage_sorted:
-            peaks = peaks_dict.get(cpd, [])
-            level_value = getattr(cpd, level_attr)
-            f.write(f"{cpd.positional_sequence},{level_value},{len(peaks)}\n")
-    print(f"✓ CSV exported: {csv_path.name}")
+        # Show pooling statistics
+        print("\n  Pooling Statistics:")
+        high_corr = sum(1 for eq in equivalence_classes.values() if eq.is_pooling_valid)
+        low_corr = sum(1 for eq in equivalence_classes.values() if eq.pooling_status == PoolingStatus.POOLING_INVALID)
+        single = sum(1 for eq in equivalence_classes.values() if eq.pooling_status == PoolingStatus.NOT_ATTEMPTED)
+        print(f"    High correlation (≥0.8): {high_corr}/{n_classes}")
+        print(f"    Low correlation (<0.8): {low_corr}/{n_classes}")
+        print(f"    Single variant: {single}/{n_classes}")
 
     # Summary
     print("\n" + "=" * 80)
     print("✅ COMPLETE")
     print("=" * 80)
-    print(f"\nReference: {reference.positional_sequence}")
+    print(f"\nReference: {reference.positional_block_sequence}")
     print(f"Lineage: {len(lineage)} compounds")
+
+    if variant_mode == AnalysisMode.POOLED and equivalence_classes:
+        print(f"Equivalence classes: {n_classes} ({n_variants} total variants)")
+
     print(f"Peaks: {total_peaks} detected")
     print(f"\nResults: {args.output}")
     print(f"  - {plot_path.name}")
-    print(f"  - {csv_path.name}")
-
-
-# =============================================================================
-# Main Entry Point
-# =============================================================================
+    print(f"  - {json_path.name}")
 
 
 def main():
     """Main entry point for lineage analysis."""
     parser = argparse.ArgumentParser(
-        description="LC-Seq Lineage Analysis - Analyze reference compound and descendants",
+        description="LC-Seq Lineage Analysis - Config-driven analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Analyze reference compound with monomer hierarchy (default, per THEORY.md)
+  # Use default configuration (configs/default.yaml)
   python examples/analyze.py --reference "Phe-DNvl-DPhe"
 
-  # Use building-block hierarchy (poset structure)
+  # Override with custom config file
+  python examples/analyze.py --reference "Phe-DNvl-DPhe" --config my_config.yaml
+
+  # Override analysis mode (config: individual → pooled)
+  python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled
+
+  # Override hierarchy mode (config: monomer → building_block)
   python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode building_block
 
-  # Custom data file
-  python examples/analyze.py --reference "Leu-Pro-Ala" --data my_data.h5
+Configuration:
+  All parameters loaded from configs/default.yaml (Single Source of Truth).
+  CLI arguments override config values when provided.
+
+  Key config parameters:
+    - analysis.variant_mode: individual or pooled
+    - analysis.hierarchy_mode: building_block or monomer
+    - detection.*: peak detection parameters
+    - pooling.*: pooling parameters (for pooled mode)
+
+Analysis Modes:
+  individual - Process each variant separately (default)
+  pooled     - Aggregate positional variants (~3-10× speedup)
 
 Hierarchy Modes:
-  monomer        - DAG with convergence, chemical identity (default, per THEORY.md)
+  monomer        - DAG with convergence, chemical identity (default)
   building_block - Poset structure based on positional sequences
-
-Terminology (per THEORY.md Section 3.1):
-  - Reference Compound: The compound currently being analyzed
-  - Lineage: All ancestors + descendants + self
-  - Descendant: Compound with fewer building blocks
-  - Ancestor: Compound with more building blocks
-
-Architecture:
-  This script contains NO business logic. It only:
-  - Loads data (infrastructure)
-  - Calls domain services (HierarchyBuilder, LineageFinderService, PeakDetector)
-  - Handles visualization (presentation concern)
         """,
     )
 
@@ -216,31 +306,52 @@ Architecture:
         "--data",
         type=Path,
         default=Path("test_data/processed_data.h5"),
-        help="HDF5 data file (default: test_data/processed_data.h5)",
+        help="HDF5 data file",
     )
     parser.add_argument(
         "--output",
         type=Path,
         default=Path("results/"),
-        help="Output directory (default: examples/lineage_results)",
+        help="Output directory",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Configuration file (default: configs/default.yaml)",
+    )
+    parser.add_argument(
+        "--variant-mode",
+        choices=["individual", "pooled"],
+        default=None,
+        help="Override analysis mode from config",
     )
     parser.add_argument(
         "--hierarchy-mode",
         choices=["building_block", "monomer"],
-        default="monomer",
-        help="Hierarchy mode: monomer (DAG, default per THEORY.md) or building_block (poset)",
+        default=None,
+        help="Override hierarchy mode from config",
     )
 
     args = parser.parse_args()
 
-    # Convert hierarchy mode string to enum
-    if args.hierarchy_mode == "building_block":
-        args.hierarchy_mode_enum = HierarchyMode.BUILDING_BLOCK
-    else:  # monomer
-        args.hierarchy_mode_enum = HierarchyMode.MONOMER
+    # Load configuration
+    if args.config:
+        config = ConfigurationLoader.load_from_yaml(args.config)
+        print(f"✓ Loaded configuration from: {args.config}")
+    else:
+        config = ConfigurationLoader.get_default_config()
+        print("✓ Loaded configuration from: configs/default.yaml")
 
-    # Run lineage analysis
-    analyze_lineage(args)
+    # Convert CLI overrides to enums
+    if args.variant_mode:
+        args.variant_mode = AnalysisMode.POOLED if args.variant_mode == "pooled" else AnalysisMode.INDIVIDUAL
+
+    if args.hierarchy_mode:
+        args.hierarchy_mode = HierarchyMode.BUILDING_BLOCK if args.hierarchy_mode == "building_block" else HierarchyMode.MONOMER
+
+    # Run analysis
+    analyze_lineage(args, config)
 
 
 if __name__ == "__main__":

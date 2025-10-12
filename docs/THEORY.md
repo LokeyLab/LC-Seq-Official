@@ -22,6 +22,165 @@
 
 ---
 
+## Vocabulary and Ubiquitous Language
+
+This section defines all technical terms used throughout theory and implementation.
+
+### Core Structures
+
+**Hierarchy**
+- **Domain term** for compound truncation structure
+- Intuitive term used in code, variables, and general discussion
+- **Formally**: a partially ordered set (poset) represented as directed acyclic graph (DAG)
+- **When to use**: Default term in all contexts
+- **See**: THEORY.md Section 1.1 for formal mathematical definition
+
+**Poset (Partially Ordered Set)**
+- **Mathematical term** emphasizing order-theoretic properties
+- Used when discussing formal properties: reflexive, antisymmetric, transitive
+- Provides connection to order theory results (principal ideals, filters, lattice theory)
+- **When to use**: Mathematical proofs, formal property discussions
+- **See**: THEORY.md Section 1.1 for axioms, Section 3.2 for operations
+
+**DAG (Directed Acyclic Graph)**
+- **Computational term** emphasizing graph structure and algorithms
+- Used when discussing algorithms: topological sort, path finding, traversal, complexity
+- Guarantees existence of topological ordering (acyclicity)
+- **When to use**: Algorithm design, complexity analysis, implementation details
+- **See**: THEORY.md Section 1.1 for properties, Section 7.1 for algorithms
+
+**Relationship**: These three terms describe the same structure at different levels:
+- Hierarchy (domain/intuitive) → Poset (mathematical) → DAG (computational)
+- All three are correct; use the term appropriate for your context
+
+**Quotient Hierarchy**
+- Hierarchy formed by grouping compounds into equivalence classes
+- One node per equivalence class (multiple positional variants collapse to single node)
+- **Mathematically**: quotient poset (P/R where R is equivalence relation)
+- **Construction**: Edge projection from original hierarchy onto equivalence classes
+- **Implementation**: `quotient_hierarchy` variable in `ProcessPooledChromatogramsUseCase`
+- **See**: THEORY.md Section 4.2.11 for edge projection algorithm
+
+### Pooled Mode (Statistical Aggregation)
+
+**Pooled Mode**
+- Analysis mode where positional variants are grouped and their signals aggregated
+- Uses **mean or median** aggregation (pooled statistics from biostatistics)
+- **NOT "consensus"** (which implies mode/voting in bioinformatics)
+- Provides ~3-10× speedup: detect peaks once per equivalence class
+- Fallback to individual mode if correlation < 0.8
+- **Implementation**: `ProcessPooledChromatogramsUseCase`
+- **See**: THEORY.md Section 4.2 for complete workflow
+
+**Pooled Signal/Chromatogram**
+- Result of aggregating (mean/median) signals from positional variants
+- **Terminology**: "Pooled" is standard biostatistics term (pooled variance, pooled analysis, meta-analysis)
+- **NOT "consensus"** (consensus = mode in bioinformatics, not mean/median)
+- Computed by `SignalAggregator.aggregate()` service
+- **See**: THEORY.md Section 4.2.4 for aggregation mathematics
+
+**PooledCompound**
+- Proxy object containing pooled chromatogram for equivalence class
+- Delegates most properties to representative (template) compound
+- Overrides `.chromatogram` property to return pooled chromatogram
+- Allows pooled signals to be processed through standard pipeline
+- **Design pattern**: Delegation Proxy (Gang of Four)
+- **Implementation**: `src/lcseq/domain/entities/pooled_compound.py`
+- **See**: THEORY.md Section 4.2.8 for proxy pattern details
+
+**Pooling Status** (enum: `PoolingStatus`)
+- Quality assessment of signal aggregation
+- **POOLING_VALID**: min correlation ≥ 0.8 (variants agree, pooling reliable)
+- **POOLING_INVALID**: min correlation < 0.8 (variants differ, use individual signals)
+- **NOT_ATTEMPTED**: single variant (no aggregation needed)
+- **Implementation**: `EquivalenceClass.pooling_status` property
+- **See**: THEORY.md Section 4.2.5 for correlation validation
+
+### Equivalence and Grouping
+
+**Equivalence Class**
+- Set of positional variants sharing same `block_support_sequence`
+- Same chemical identity at block/monomer level, different synthesis paths
+- Grouped together for pooled mode analysis
+- **Example**: "Val-Leu" = {[Val,Leu,Null], [Val,Null,Leu], [Null,Val,Leu]}
+- **Implementation**: `EquivalenceClass` model
+- **See**: THEORY.md Section 4.2.1 for grouping algorithm
+
+**Block Support Sequence**
+- Chemical identity at block/monomer level (**position-independent**)
+- Non-null building blocks/monomers in canonical order
+- Used as equivalence class key
+- **Example**: "Val-Leu" (same regardless of positions)
+- **Replaces**: deprecated term "residue_sequence"
+- **See**: THEORY.md Section 2.3 for definition
+
+**Positional Block Sequence**
+- Synthesis path (**position-dependent** encoding)
+- Complete building block sequence including nulls and positions
+- **Example**: "Val-Null-Leu" ≠ "Null-Val-Leu" (different synthesis paths)
+- **Replaces**: deprecated term "positional_sequence"
+- **See**: THEORY.md Section 2.2 for definition
+
+### Implementation Traceability
+
+Each concept links to:
+- **Theory**: THEORY.md section with formal definition and proofs
+- **Implementation**: Specific class/method/file in codebase
+- **Tests**: Unit and integration tests verifying correctness
+
+For detailed code-to-theory mappings, see "Theoretical Foundation" sections in docstrings.
+
+### Peak Classification and Validation
+
+**Peak Type Classification**
+- Classification of detected peaks based on retention time position and DAG constraints
+- Four classification types from chromatographic analysis:
+  - **NULL**: Peak at L₀ retention time (DNA tag only, no peptide)
+  - **TRUNCATION**: Peak matching ancestor product position (incomplete synthesis)
+  - **PUTATIVE_PRODUCT**: Peak positionally consistent with expected product elution
+  - **UNKNOWN**: Peak that cannot be classified (late-eluting, unmatched)
+- **CRITICAL**: Classification is a positional hypothesis, NOT chemical validation
+- "Putative" emphasizes inference from retention time, not confirmation by mass spectrometry
+- **Implementation**: `PeakType` enum in `src/lcseq/domain/entities/peak.py`
+- **See**: THEORY.md Section 5.3 for classification algorithm details
+
+**Validation Status**
+- Synthesis success assessment using adaptive Bayesian framework
+- **Independent from peak classification**: Can have PUTATIVE_PRODUCT peak but not VALIDATED synthesis
+- Six validation categories (confidence-based progression):
+  - **VALIDATED**: Synthesis succeeded with high confidence (strong evidence)
+  - **LIKELY_SUCCESS**: Synthesis probably succeeded (moderate confidence)
+  - **UNCERTAIN**: Ambiguous result - cannot determine success or failure
+  - **LIKELY_FAILURE**: Synthesis probably failed (moderate confidence)
+  - **FAILED**: Synthesis failed with high confidence (strong evidence against)
+  - **NOT_VALIDATED**: Validation not yet performed
+- **Implementation**: `ValidationStatus` enum in `src/lcseq/domain/entities/peak.py`
+- **See**: THEORY.md Section 6.10 for validation algorithm
+- **See**: THEORY.md Section 6.13 for classification vs validation distinction
+
+### Level and Hierarchy Metrics
+
+**Level (Truncation Level)**
+- Number of non-null building blocks in compound
+- **Level 0** (L₀): Complete truncation, all building blocks are null (DNA tag only)
+- **Level N**: Maximal compounds with N non-null building blocks
+- Used to organize compounds into hierarchy layers
+- **Property**: `compound.level` returns integer count
+- **Usage**: `hierarchy.get_level(k)` returns all compounds at level k
+- **See**: THEORY.md Section 3.3 for hierarchy level properties
+
+**Monomer Level**
+- Total number of monomers after decomposing composite building blocks
+- Used exclusively in monomer hierarchy mode
+- May differ from building block level when composite blocks present
+- **Example**: Compound with [Leu-Ala-Val, Pro] has level=2 (two blocks) but monomer_level=4 (four monomers)
+- Enables finer-grained hierarchy analysis at monomer granularity
+- **Property**: `compound.monomer_level` returns integer count
+- **See**: THEORY.md Section 1.5.3 for monomer-level decomposition
+- **See**: THEORY.md Section 4.2.3 for monomer mode hierarchy
+
+---
+
 # I. FOUNDATIONS
 
 ## PART 1: MATHEMATICAL STRUCTURE
@@ -54,7 +213,7 @@ The LC-Seq compound library forms a **Directed Acyclic Graph (DAG)** representin
   - [Null, Val, Null] = chemically "Val" (same molecule!)
   - [Null, Null, Val] = chemically "Val" (same molecule!)
 
-**Positional Sequence (Synthesis Path)**
+**Positional Block Sequence (Synthesis Path)**
 
 - How/when the peptide was synthesized
 - Position-dependent encoding
@@ -68,23 +227,23 @@ The LC-Seq compound library forms a **Directed Acyclic Graph (DAG)** representin
 
 ### 1.3 Two Analysis Modes, Two Graph Structures
 
-#### Building-Block Mode (Poset Structure)
+#### Building-Block Mode (DAG with Convergence at Block Granularity)
 
-**Vertices**: Positional sequences (unique by synthesis path)
+**Vertices**: Equivalence classes (block support sequences)
 
 **Example compounds**:
 
-- [Val, Null, Null] = vertex A
-- [Null, Val, Null] = vertex B (different from A)
-- [Null, Null, Val] = vertex C (different from A and B)
+- [Val, Null, Null] = vertex "Val"
+- [Null, Val, Null] = vertex "Val" (SAME as above!)
+- [Null, Null, Val] = vertex "Val" (SAME as above!)
 
-**Structure**: Forest (multiple disconnected trees)
+**Structure**: DAG with convergence (multiple synthesis paths → same block composition)
 
 **Properties**:
 
-- No convergence
-- Each positional variant is separate vertex
-- Edges: building block subset relationships
+- Convergence at block granularity
+- Positional variants with same blocks converge to same vertex
+- Edges: block support subsequence relationships
 
 #### Monomer-Level Mode (DAG with Convergence)
 
@@ -197,17 +356,21 @@ Leu-Pro-Phe  (maximal, 3 blocks)
 **Properties**:
 
 - Each truncation step removes exactly **one building block**
-- Unambiguous: Position information preserved
-- Graph structure: **Forest** (no convergence)
+- Unambiguous: Position information preserved from synthesis
+- Graph structure: **DAG with convergence at block granularity**
 - Total compounds: 4 × 3 × 3 = 36 (including L₀)
 
 **Edge Generation Algorithm (Block Mode)**:
 
 ```
-For each compound C = [B₀, B₁, B₂, ..., Bₙ]:
-  For each position i where Bᵢ ≠ Null:
-    Create descendant D by setting Dᵢ = Null, all other positions unchanged
-    Add edge: C → D
+For each compound C with block support sequence S:
+  For each compound D in hierarchy:
+    If D's block support sequence is a proper subsequence of S:
+      If D is at nearest level below C:
+        Add edge: C → D
+
+Note: Positional variants with same block support sequence will have
+identical descendants because edges are based on subsequence relationships.
 ```
 
 #### 1.5.3 Monomer-Level Decomposition
@@ -541,29 +704,38 @@ Leu-Leu-Ala-Val-Pro (5 monomers)
 
 ### 2.2 Sequence Representations
 
-**Positional Sequence**
+The LC-Seq system uses three distinct sequence representations at different granularities:
 
-- Exact representation including null positions
+**Positional Block Sequence**
+
+- Full synthesis path including null positions at block granularity
 - Example: Leu-Null-Pro
-- Unique per compound (synthesis path)
-- Attribute: Compound.positional_sequence or Compound.sequence
+- Unique per compound (encodes synthesis path)
+- Attribute: Compound.positional_block_sequence
+- Mathematical: σ: Cycles → BuildingBlocks ∪ {Null}
 
-**Canonical Sequence** (or **Residue Sequence**)
+**Block Support Sequence**
 
-- Non-null building blocks only
+- Restriction to support (non-null positions) at block granularity
 - Example: Leu-Pro (from Leu-Null-Pro)
-- Multiple positional sequences → same canonical
-- Used for grouping positional variants
-- Attribute: Compound.residue_sequence
+- Multiple positional block sequences → same block support sequence (positional variants)
+- Used as equivalence class identifier
+- Attribute: Compound.block_support_sequence
+- Mathematical: π(σ) where π projects to support domain
 
-**Monomer Sequence**
+**Monomer Support Sequence**
 
-- Fully decomposed individual monomers
+- Fully decomposed to individual monomers, support only (no nulls)
 - Example: "Leu-Leu-Ala-Val-Pro" where position 1 is composite block "Leu-Ala-Val"
   - Decomposes to: ["Leu", "Leu", "Ala", "Val", "Pro"] (5 individual monomers)
-- Chemical peptide identity (what molecule exists)
+- Chemical peptide identity at monomer granularity
 - Composite blocks expand to their constituent monomers
+- Attribute: Compound.monomer_support_sequence
 - Method: BuildingBlock.decompose_to_monomers()
+
+**Note on Terminology:**
+- "Support" refers to the mathematical concept: the domain where the function is non-zero/non-null
+- Nulls exist only at block level (synthesis positions); at monomer level there are no nulls by definition
 
 ### 2.3 Temporal Representation and Alignment
 
@@ -673,7 +845,7 @@ If similarity-based ordering is not required, skip alignment entirely. Use alter
 
 - By hierarchy level (truncation rank)
 - By sequence length (number of building blocks)
-- By positional sequence (lexicographic)
+- By positional block sequence (lexicographic)
 - By validation status (VALIDATED first, etc.)
 
 **Computational Complexity**:
@@ -1182,17 +1354,17 @@ All three synthesis paths converge to the same chemical "Val-Phe" vertex in mono
 
 **Why This Matters:**
 
-- Consensus mode aggregates positional variants (same chemical peptide)
+- Pooled mode aggregates positional variants (same chemical peptide)
 - Peak selection considers all synthesis paths for a peptide
 - Similarity analysis groups by chemical identity, not synthesis
 
-### 4.2 Equivalence Classes and Consensus Analysis
+### 4.2 Equivalence Classes and Pooled Mode Analysis
 
 #### 4.2.1 EquivalenceClass Definition
 
-**EquivalenceClass**: Collection of positional sequences that represent the same chemical peptide (same residue sequence).
+**EquivalenceClass**: Collection of positional variants that represent the same chemical peptide at block granularity.
 
-**Formal Definition**: An equivalence class under the relation R: "has same residue sequence"
+**Formal Definition**: An equivalence class under the relation R: "has same block support sequence"
 
 **Equivalence Relation Properties**:
 
@@ -1203,33 +1375,35 @@ All three synthesis paths converge to the same chemical "Val-Phe" vertex in mono
 **Example**:
 
 ```
-Equivalence class for "Val":
-  - [Val, Null, Null] (position 1)
-  - [Null, Val, Null] (position 2)
-  - [Null, Null, Val] (position 3)
+Equivalence class for block support sequence "Val":
+  - [Val, Null, Null] (positional block sequence - synthesis path 1)
+  - [Null, Val, Null] (positional block sequence - synthesis path 2)
+  - [Null, Null, Val] (positional block sequence - synthesis path 3)
 
-All three positional variants represent the same chemical peptide: Val
+All three positional variants (members) represent the same chemical peptide: Val
 ```
 
 **Chemical Interpretation**:
 
-- Same residue sequence = same chemical molecule
-- Different positional sequences = different synthesis paths to same molecule
+- Same block support sequence = same chemical molecule at block granularity
+- Different positional block sequences = different synthesis paths to same molecule
 - EquivalenceClass groups synthesis paths by chemical identity
+- Members of an equivalence class are positional variants
 
-**Entity**: EquivalenceClass (collection of positional variants)
+**Entity**: EquivalenceClass (collection of members)
+**Identifier**: block_support_sequence (the equivalence class identifier)
 
-#### 4.2.2 Consensus Mode: Optional Optimization
+#### 4.2.2 Pooled Mode: Optional Optimization
 
-**Purpose**: Consensus mode is an **optional performance optimization** that can provide:
+**Purpose**: Pooled mode is an **optional performance optimization** that can provide:
 
 1. **Computational speedup**: Process N equivalence classes instead of 3N-10N positional variants (~3-10× faster)
 2. **Noise reduction**: Average out positional encoding noise and experimental variability
 3. **Molecular focus**: One result per chemical molecule, not per synthesis path
 
-**Important**: Consensus mode is **NOT required** - individual mode (analyzing each positional variant separately) is fully valid and remains the default approach.
+**Important**: Pooled mode is **NOT required** - individual mode (analyzing each positional variant separately) is fully valid and remains the default approach.
 
-**When to Consider Consensus Mode**:
+**When to Consider Pooled Mode**:
 
 - ✅ Large datasets (many positional variants)
 - ✅ Variants have similar chromatographic behavior
@@ -1241,7 +1415,7 @@ All three positional variants represent the same chemical peptide: Val
 - ✅ Position-specific diagnostics needed
 - ✅ Synthesis troubleshooting (identify problematic positions)
 - ✅ Small datasets (speedup not critical)
-- ✅ Variants have different behavior (consensus invalid)
+- ✅ Variants have different behavior (pooling invalid)
 - ✅ Regulatory/validation requirements (need actual measurements)
 
 **Performance Impact**:
@@ -1253,41 +1427,47 @@ N_variants compounds to process (e.g., 3³ = 27 for 3-position library)
 Each processed independently through full pipeline
 ```
 
-Consensus mode:
+Pooled mode:
 
 ```
-N_classes equivalence classes (e.g., 7 unique residue sequences)
-Peak detection on consensus (once per class)
+N_classes equivalence classes (e.g., 7 unique block support sequences)
+Peak detection on pooled signal (once per class)
 Area integration on variants (per variant, but cheap)
 
 Speedup ≈ N_variants / N_classes (typically 3-10×)
 ```
 
-**Recommendation**: Start with individual mode (simpler, always valid); adopt consensus mode if speedup needed and variants validated as similar.
+**Recommendation**: Start with individual mode (simpler, always valid); adopt pooled mode if speedup needed and variants validated as similar.
 
-#### 4.2.3 Hybrid Consensus Strategy
+**Implementation**:
+- Use Case: `ProcessPooledChromatogramsUseCase`
+- File: `src/lcseq/application/use_cases/process_pooled_chromatograms.py`
+- Services: `SignalAggregator`, `PoolingValidator`, `EquivalenceClassBuilder`
+- Tests: `tests/application/use_cases/test_process_pooled_chromatograms.py`
 
-**Key Insight**: Peak detection is expensive, area integration is cheap. Do expensive operations once (on consensus), cheap operations per variant (on individuals).
+#### 4.2.3 Hybrid Pooled Strategy
+
+**Key Insight**: Peak detection is expensive, area integration is cheap. Do expensive operations once (on pooled signal), cheap operations per variant (on individuals).
 
 **Hybrid Approach**:
 
-**Phase 1: Peak Detection on Consensus Signal** (expensive, do once)
+**Phase 1: Peak Detection on Pooled Signal** (expensive, do once)
 
 ```
 For each equivalence class:
-  1. Aggregate variant signals → consensus_signal
-  2. Peak detection (Discrete Morse + Poisson + Prominence) on consensus
-  3. Peak classification (DAG constraints) on consensus
+  1. Aggregate variant signals → pooled_signal
+  2. Peak detection (Discrete Morse + Poisson + Prominence) on pooled signal
+  3. Peak classification (DAG constraints) on pooled signal
 
-Output: Representative peak positions and boundaries for the molecule
+Output: Pooled peak positions and boundaries for the equivalence class
 ```
 
 **Phase 2: Area Integration on Individual Variants** (cheap, do per-variant)
 
 ```
 For each variant in equivalence class:
-  1. Use consensus peak boundaries (from Phase 1)
-  2. Integrate areas in variant's own signal (not consensus!)
+  1. Use pooled peak boundaries (from Phase 1)
+  2. Integrate areas in variant's own signal (not pooled signal!)
   3. Compute purity for this variant
   4. Validate this variant independently
 
@@ -1319,9 +1499,9 @@ Class-level validation:
 
 - ❌ Averaging purities (loses position-specific info)
 - ❌ Processing every variant through expensive peak detection
-- ❌ Mixing consensus and individual purities in dataset (comparability issues)
+- ❌ Mixing pooled and individual purities in dataset (comparability issues)
 
-#### 4.2.4 Consensus Signal Aggregation
+#### 4.2.4 Pooled Signal Aggregation
 
 **Prerequisite**: Signal alignment (Part 2.3) - all variants on common time grid
 
@@ -1341,14 +1521,14 @@ Interpolate each variant to common grid:
     vᵢ_aligned = interpolate(vᵢ.signal, t_grid)
 ```
 
-**Step 2: Compute Consensus Signal**
+**Step 2: Compute Pooled Signal**
 
 ```
 Aggregation method (recommend mean):
-  consensus_signal(t) = mean(v₁_aligned(t), v₂_aligned(t), ..., vₙ_aligned(t))
+  pooled_signal(t) = mean(v₁_aligned(t), v₂_aligned(t), ..., vₙ_aligned(t))
 
 Alternative (robust to outliers):
-  consensus_signal(t) = median(v₁_aligned(t), v₂_aligned(t), ..., vₙ_aligned(t))
+  pooled_signal(t) = median(v₁_aligned(t), v₂_aligned(t), ..., vₙ_aligned(t))
 
 Recommendation: Mean (smoother, faster, standard)
 ```
@@ -1364,7 +1544,7 @@ Check: min(all correlations) > threshold (e.g., 0.8)
 
 If correlation too low:
   → Variants have different chromatographic behavior
-  → Consensus aggregation invalid
+  → Pooling aggregation invalid
   → Fall back to individual mode
   → Report: "Positional variants differ - individual analysis required"
 ```
@@ -1375,20 +1555,20 @@ If correlation too low:
 
 - If variant 1 has peak at t=20, variant 2 at t=25 → averaging creates artificial broad "peak"
 - If variant 1 clean, variant 2 very noisy → averaging doesn't represent either
-- Low correlation = consensus invalid = must use individual mode
+- Low correlation = pooling invalid = must use individual mode
 
 **Recommended Threshold**: correlation > 0.8 (strong similarity required)
 
-#### 4.2.5 Peak Detection on Consensus Signal
+#### 4.2.5 Peak Detection on Pooled Signal
 
-**Apply full detection pipeline to consensus signal**:
+**Apply full detection pipeline to pooled signal**:
 
-**CRITICAL**: Consensus mode does NOT change processing parameters. The same uniform parameters (scale ranges) apply to both consensus signals and individual variant signals to ensure comparability.
+**CRITICAL**: Pooled mode does NOT change processing parameters. The same uniform parameters (scale ranges) apply to both pooled signals and individual variant signals to ensure comparability.
 
 **Step 1: Peak Detection**
 
 ```
-peaks = detect_peaks(consensus_signal)
+peaks = detect_peaks(pooled_signal)
 (Same parameters as individual mode - Part 5.1-5.2)
 ```
 
@@ -1396,7 +1576,7 @@ peaks = detect_peaks(consensus_signal)
 
 ```
 Discrete Morse theory (Part 5.1) + Poisson statistics (Part 5.2)
-→ Detect significant peaks in consensus signal
+→ Detect significant peaks in pooled signal
 Output: Peak positions, boundaries, prominence, Z-scores
 ```
 
@@ -1405,10 +1585,10 @@ Output: Peak positions, boundaries, prominence, Z-scores
 ```
 DAG constraint propagation (Part 5.3-5.4)
 → Classify peaks: NULL, TRUNCATION, PUTATIVE_PRODUCT, UNKNOWN
-Output: Peak labels for consensus
+Output: Peak labels for pooled signal
 ```
 
-**Output**: Representative peak information for the equivalence class
+**Output**: Pooled peak information for the equivalence class
 
 - Peak positions (retention times)
 - Peak boundaries [t_start, t_end] for each peak
@@ -1419,12 +1599,12 @@ Output: Peak labels for consensus
 **Rationale**:
 
 - Peak positions should be similar across variants (if correlation valid)
-- Consensus signal has better SNR (noise averaged out)
+- Pooled signal has better SNR (noise averaged out)
 - Detecting once is much faster than detecting N times
 
 #### 4.2.6 Area Integration on Individual Variants
 
-**Use consensus peak boundaries, but integrate on individual variant signals** (NOT consensus).
+**Use pooled peak boundaries, but integrate on individual variant signals** (NOT consensus).
 
 **Algorithm**:
 
@@ -1433,12 +1613,12 @@ For each variant vᵢ in equivalence class:
 
   Input:
     - vᵢ_signal_raw (variant's raw signal)
-    - peak_boundaries from consensus (Phase 1)
+    - peak_boundaries from pooled signal (Phase 1)
 
   Step 1: Use raw variant signal directly
     vᵢ_signal = vᵢ_signal_raw
 
-  Step 2: Integrate areas using consensus boundaries
+  Step 2: Integrate areas using pooled boundaries
     For each peak with boundaries [t_start, t_end]:
       Area_peak_vᵢ = Σ vᵢ_signal(t) for t ∈ [t_start, t_end]
 
@@ -1453,7 +1633,7 @@ For each variant vᵢ in equivalence class:
     Store: Individual purity and validation for this variant
 ```
 
-**Critical**: Each variant's purity computed from its OWN signal, not from consensus.
+**Critical**: Each variant's purity computed from its OWN signal, not from pooled signal.
 
 **Why This Approach**:
 
@@ -1466,8 +1646,8 @@ For each variant vᵢ in equivalence class:
 **What This Avoids**:
 
 - ❌ Averaging purities (loses position-specific info)
-- ❌ Purity from consensus signal (not a real measurement)
-- ❌ Mixing consensus and individual purities (comparability issues)
+- ❌ Purity from pooled signal (not a real measurement)
+- ❌ Mixing pooled and individual purities (comparability issues)
 
 #### 4.2.7 Aggregate Statistics and Reporting
 
@@ -1521,7 +1701,7 @@ Interpretation: Val synthesis good at positions 1&3, problematic at position 2
 
 #### 4.2.8 Validity Requirements
 
-**Consensus mode is valid ONLY IF positional variants have similar chromatographic behavior.**
+**Pooled mode is valid ONLY IF positional variants have similar chromatographic behavior.**
 
 **Validity Checks**:
 
@@ -1535,7 +1715,7 @@ For each equivalence class:
 
   If min(correlations) < correlation_threshold:
     → Variants too different
-    → Consensus invalid
+    → Pooling invalid
     → Fall back to individual mode
     → Flag: "Position-dependent chromatography detected"
 ```
@@ -1552,7 +1732,7 @@ If using individual mode first (to validate):
 
     If Δt > retention_precision × 3:
       → Peak positions vary significantly
-      → Consensus may merge/blur peaks
+      → Pooled signal may merge/blur peaks
       → Consider individual mode
 ```
 
@@ -1589,14 +1769,14 @@ After computing individual purities:
 ```
 For each equivalence class:
 
-  Step 1: Attempt consensus mode
-    1a. Aggregate signals → consensus
+  Step 1: Attempt pooled mode
+    1a. Aggregate signals → pooled signal
     1b. Run correlation check (Check 1)
 
     If min(correlation) < 0.8:
       → Log warning: "EquivalenceClass [sequence] failed correlation check"
       → Automatically fall back to individual mode
-      → Flag class as "CONSENSUS_INVALID" in metadata
+      → Flag class as "POOLING_INVALID" in metadata
       → Proceed with Step 2
 
   Step 2: Individual mode processing
@@ -1616,22 +1796,22 @@ For each equivalence class:
 **Class-Level Status**:
 
 ```
-If consensus mode succeeded:
-  status = "CONSENSUS_VALID"
+If pooled mode succeeded:
+  status = "POOLING_VALID"
 
 If fell back to individual mode:
   If Check 2 or Check 3 failed:
     status = "HETEROGENEOUS" (variants have different behavior)
   Else:
-    status = "CONSENSUS_INVALID_BUT_SIMILAR" (low correlation but stable)
+    status = "POOLING_INVALID_BUT_SIMILAR" (low correlation but stable)
 ```
 
 **Output Flags**:
 
 ```python
 class_metadata = {
-    "consensus_attempted": True,
-    "consensus_valid": False,  # Fell back
+    "pooling_attempted": True,
+    "pooling_valid": False,  # Fell back
     "correlation_min": 0.67,  # Below threshold
     "fallback_reason": "Low signal correlation between positional variants",
     "mode_used": "individual",
@@ -1645,14 +1825,14 @@ class_metadata = {
 In summary output:
 ```
 EquivalenceClass: Val (3 variants)
-  Mode: Individual (consensus invalid - correlation 0.67 < 0.8)
+  Mode: Individual (pooling invalid - correlation 0.67 < 0.8)
   Mean purity: 0.85 ± 0.08
   Recommendation: Review variants - possible position-dependent effects
 ```
 
-**Key Principle**: Fallback is automatic and transparent. User sees which classes used consensus vs individual mode and why.
+**Key Principle**: Fallback is automatic and transparent. User sees which classes used pooled vs individual mode and why.
 
-#### 4.2.9 Individual vs Consensus Mode Comparison
+#### 4.2.9 Individual vs Pooled Mode Comparison
 
 **Individual Mode** (default, always valid):
 
@@ -1685,15 +1865,15 @@ Output: N_variants individual results
 
 ---
 
-**Consensus Mode** (optional optimization, hybrid approach):
+**Pooled Mode** (optional optimization, hybrid approach):
 
-**Approach**: Detect peaks on consensus, quantify on individuals
+**Approach**: Detect peaks on pooled signal, quantify on individuals
 
 ```
 For each of N_classes equivalence classes:
-  1. Aggregate variants → consensus signal (cheap)
-  2. Peak detection on consensus (expensive, done once)
-  3. Peak classification on consensus
+  1. Aggregate variants → pooled signal (cheap)
+  2. Peak detection on pooled signal (expensive, done once)
+  3. Peak classification on pooled signal
   5. For each variant:
      - Area integration (cheap, per-variant)
      - Purity calculation (per-variant)
@@ -1704,7 +1884,7 @@ Output: N_variants individual results + N_classes summaries
 
 **Advantages**:
 ✅ Faster (~3-10× speedup for peak detection)
-✅ Noise reduction (consensus has higher SNR)
+✅ Noise reduction (pooled signal has higher SNR)
 ✅ Molecular-level summaries (mean_purity, class validation)
 ✅ Still get individual purities (validity maintained)
 ✅ Position-specific diagnostics available
@@ -1713,7 +1893,7 @@ Output: N_variants individual results + N_classes summaries
 ❌ Requires variant similarity (correlation check)
 ❌ More complex workflow
 ❌ Additional validation steps required
-❌ Consensus peak boundaries may not be optimal for all variants
+❌ Pooled peak boundaries may not be optimal for all variants
 
 **When to use**: Large datasets, similar variants, molecular-level analysis, speedup needed
 
@@ -1723,14 +1903,222 @@ Output: N_variants individual results + N_classes summaries
 
 **Start with Individual Mode**: Simpler, always valid, complete information
 
-**Consider Consensus Mode** if:
+**Consider Pooled Mode** if:
 
 1. Dataset is large (many positional variants)
 2. Speedup is needed (peak detection bottleneck)
 3. Variants validated as similar (correlation > 0.8)
 4. Molecular focus appropriate (chemical identity over synthesis path)
 
-**Best Practice**: Run correlation check on sample of classes before committing to consensus mode for full dataset
+**Best Practice**: Run correlation check on sample of classes before committing to pooled mode for full dataset
+
+#### 4.2.10 PooledCompound: Pooled Signal Processing Proxy
+
+**Purpose**: PooledCompound is an immutable proxy that allows pooled chromatograms to be processed through the standard pipeline without mutating the original compound data.
+
+**Design Pattern**: Delegation Proxy with Restricted Mutation
+
+**Key Insight**: We want to process pooled signals (synthetic aggregates) through the same pipeline as real compounds, but we need to preserve the original compound data for downstream analysis.
+
+**Implementation**:
+
+```python
+class PooledCompound:
+    """
+    Proxy that delegates most attributes to a real compound
+    but overrides chromatogram with pooled signal.
+    """
+
+    __slots__ = ('_real', '_pooled_chromatogram', 'detected_peaks', 'selected_peak')
+
+    @property
+    def chromatogram(self):
+        # Override: Return pooled chromatogram
+        return self._pooled_chromatogram
+
+    def __getattr__(self, name):
+        # Delegate all other attributes to real compound
+        return getattr(self._real, name)
+
+    def __eq__(self, other):
+        # Hierarchy compatibility: compare by real compound
+        return self._real == other if not isinstance(other, PooledCompound) else self._real == other._real
+
+    def __hash__(self):
+        # Hierarchy compatibility: hash by real compound
+        return hash(self._real)
+```
+
+**Usage in Pooled Mode**:
+
+```
+For each equivalence class with variants {v₁, v₂, ..., vₙ}:
+
+  1. Aggregate signals → pooled_chromatogram
+
+  2. Create PooledCompound:
+     virtual = PooledCompound(
+         real_compound=v₁,  # Use first variant as template
+         pooled_chromatogram=pooled_chromatogram
+     )
+
+  3. Process virtual through pipeline:
+     peaks = detect_peaks(virtual.chromatogram)  # Uses pooled signal!
+     virtual.detected_peaks = peaks
+     descendants = hierarchy.get_descendants(virtual)  # Works via __hash__!
+
+  4. Transfer results to all real variants:
+     for variant in [v₁, v₂, ..., v₁]:
+         variant.detected_peaks = virtual.detected_peaks
+         variant.selected_peak = virtual.selected_peak
+```
+
+**Why This Works**:
+
+✅ **Immutable**: Original compound data never modified
+✅ **Automatic delegation**: `__getattr__` forwards all properties (building_blocks, level, sequences)
+✅ **Restricted mutation**: `__setattr__` only allows setting detected_peaks/selected_peak
+✅ **Hierarchy compatible**: `__eq__` and `__hash__` delegate to real compound for set/dict operations
+✅ **Type safety**: `__slots__` prevents accidental attribute creation
+
+**Safety Features**:
+
+- PooledCompound is a temporary processing artifact (created, used, discarded)
+- Results transferred to real compounds before returning to user
+- No PooledCompounds appear in final output
+- Pipeline code doesn't need to know about PooledCompound (duck typing)
+
+**Distinction from Representative**:
+
+❌ **NOT a representative**: Virtual compound is a synthetic aggregate of ALL members
+❌ **NOT selected**: No single member is chosen to represent the class
+✅ **Aggregate**: Pooled signal = mean/median of all variants
+✅ **Temporary**: Used only during processing, not stored
+
+**References**: `src/lcseq/domain/entities/pooled_compound.py`
+
+
+**Implementation**:
+- Class: `PooledCompound`
+- File: `src/lcseq/domain/entities/pooled_compound.py`
+- Pattern: Delegation Proxy (GoF Design Patterns)
+- Tests: `tests/domain/entities/test_pooled_compound.py`
+
+#### 4.2.11 Quotient Hierarchy: Edge Projection Algorithm
+
+**Problem**: When grouping positional variants into equivalence classes, we need a new hierarchy where nodes are equivalence classes (not individual compounds).
+
+**Challenge**: PooledCompounds only know about one real compound (their template), but the hierarchy needs to reflect relationships between equivalence classes, not individual variants.
+
+**Solution**: Project edges from the original hierarchy onto equivalence classes using set-based edge projection.
+
+**Algorithm**:
+
+```
+Input:
+  - Original hierarchy H with compounds as nodes
+  - Equivalence classes E = {C₁, C₂, ..., Cₖ}
+  - Pooled compounds {vc₁, vc₂, ..., vcₖ} (one per class)
+
+Step 1: Create empty quotient hierarchy
+  quotient_hierarchy = CompoundHierarchy(mode=H.mode)
+
+  Add all pooled compounds as nodes:
+  for vc in pooled_compounds:
+      quotient_hierarchy.add_compound(vc)
+
+Step 2: Build mappings
+  # Map: block support sequence → pooled compound
+  block_support_to_pooled = {
+      Cᵢ.block_support_sequence: vcᵢ
+      for Cᵢ, vcᵢ in zip(equivalence_classes, pooled_compounds)
+  }
+
+  # Map: original compound → block support sequence
+  compound_to_block_support = {
+      variant: C.block_support_sequence
+      for C in equivalence_classes
+      for variant in C.members
+  }
+
+Step 3: Project edges (CRITICAL: use direct descendants only!)
+  edges_added = set()
+
+  for compound in H.compounds:
+      if compound not in compound_to_block_support:
+          continue
+
+      ancestor_block_support = compound_to_block_support[compound]
+      ancestor_pooled = block_support_to_pooled[ancestor_block_support]
+
+      # Get DIRECT descendants (not transitive closure!)
+      direct_descendants = H.get_direct_descendants(compound)
+
+      for desc in direct_descendants:
+          if desc not in compound_to_block_support:
+              continue
+
+          desc_block_support = compound_to_block_support[desc]
+          desc_pooled = block_support_to_pooled[desc_block_support]
+
+          # Add edge if not already added and not same equivalence class
+          edge = (ancestor_pooled, desc_pooled)
+          if edge not in edges_added and ancestor_block_support != desc_block_support:
+              quotient_hierarchy.add_edge(ancestor_pooled, desc_pooled)
+              edges_added.add(edge)
+
+Output: quotient_hierarchy with equivalence class relationships
+```
+
+**Key Principles**:
+
+1. **Use direct descendants only**: Prevents creating transitive edges (preserves DAG structure)
+2. **Deduplicate edges**: Same edge may be inferred from multiple variants
+3. **Skip self-loops**: Variants in same class don't create edges
+4. **Preserve DAG**: Result is a quotient structure (same mode as original)
+
+**Example**:
+
+```
+Original hierarchy (individual compounds):
+  [Val, Leu, Null] → [Val, Null, Null]
+  [Null, Val, Leu] → [Null, Val, Null]  (different synthesis paths)
+  [Null, Leu, Val] → [Null, Null, Val]
+
+Equivalence classes:
+  C₁: "Val-Leu" = {[Val, Leu, Null], [Null, Val, Leu], [Null, Leu, Val]}
+  C₂: "Val" = {[Val, Null, Null], [Null, Val, Null], [Null, Null, Val]}
+
+Quotient hierarchy (projected):
+  vc₁ (Val-Leu) → vc₂ (Val)
+
+  (Single edge represents 3 underlying paths from different variants)
+```
+
+**Mathematical Interpretation**:
+
+- Original hierarchy: Poset of compounds ordered by truncation
+- Quotient hierarchy: Quotient poset (poset modulo equivalence relation)
+- Edge projection: Induced subposet homomorphism
+- Result: DAG where nodes are equivalence classes, edges are truncation relationships
+
+**Why Not Rebuild From Scratch**:
+
+❌ PooledCompound only knows about one variant (its template)
+❌ Building from PooledCompound.building_blocks loses information about other variants
+✅ Edge projection preserves all relationships from all variants
+✅ Quotient structure is mathematically correct
+
+**References**:
+- `src/lcseq/application/use_cases/process_pooled_chromatograms.py:203-252`
+- Step 3: Build quotient hierarchy by projecting original hierarchy edges
+
+
+**Implementation**:
+- Use Case: `ProcessPooledChromatogramsUseCase._build_quotient_hierarchy()`
+- File: `src/lcseq/application/use_cases/process_pooled_chromatograms.py` (lines 203-252)
+- Algorithm: Edge projection onto equivalence class representatives
+- Tests: `tests/application/use_cases/test_process_pooled_chromatograms.py::test_quotient_hierarchy_construction`
 
 ### 4.3 Truncation Hierarchy Structure
 
@@ -1996,7 +2384,7 @@ Peak:
 **Use in Integration**:
 Peak area = Σ corrected_signal(t) for t ∈ [t_start, t_end]
 
-This provides the peak boundaries needed for purity calculation (Part 5.0.7) and consensus mode area integration (Part 4.2.6).
+This provides the peak boundaries needed for purity calculation (Part 5.0.7) and pooled mode area integration (Part 4.2.6).
 
 ### 5.3 Peak Type Classification
 
@@ -2054,6 +2442,100 @@ For detected peaks at positions [10, 15, 25, 35, 50] with NULL position 10 and a
 - Peaks at positions 15 and 25 are classified as TRUNCATION (match ancestors)
 - Peak at position 35 is classified as PUTATIVE_PRODUCT (first significant peak after truncations)
 - Peak at position 50 is classified as UNKNOWN (no expected position match - could be oligomer, contaminant, etc.)
+
+#### 5.3.1 Truncation Boundary: Retention Time Margin
+
+**Problem**: Peak matching uses tolerance thresholds to account for retention time variability, but this can incorrectly assign late-eluting peaks as truncations when they're actually products.
+
+**Solution**: Introduce a **truncation boundary** - a hard cutoff beyond which peaks cannot be classified as TRUNCATION.
+
+**Definition**:
+
+```
+truncation_boundary = max(expected_truncation_positions) + truncation_margin
+
+where:
+  expected_truncation_positions = {L₀_position, descendant_product_positions...}
+  truncation_margin = absolute time margin (default: 60 seconds)
+```
+
+**Purpose**:
+
+1. **Validate TRUNCATION assignments**: Peaks assigned as TRUNCATION by the Hungarian algorithm must elute BEFORE the boundary
+2. **Define PRODUCT candidates**: Peaks must elute AFTER the boundary to be considered for PUTATIVE_PRODUCT classification
+3. **Account for variability**: The margin accommodates retention time shifts between compounds due to:
+   - Matrix effects
+   - Column aging
+   - Temperature fluctuations
+   - Discrete fraction collection timing
+
+**Algorithm**:
+
+```
+Step 1: Compute truncation boundary
+  max_truncation_pos = max(L₀_position, max(descendant_products))
+  truncation_boundary = max_truncation_pos + truncation_margin
+
+Step 2: Validate TRUNCATION assignments
+  For each peak assigned as TRUNCATION:
+    if peak.position > truncation_boundary:
+      → Reclassify as unassigned (cannot be truncation)
+      → Peak too late - likely product or unknown
+
+Step 3: Determine PRODUCT candidates
+  For each unassigned peak:
+    if peak.position > truncation_boundary:
+      → Candidate for PUTATIVE_PRODUCT
+    else:
+      → Mark as UNKNOWN (between truncations, ambiguous)
+
+Step 4: Select PUTATIVE_PRODUCT
+  From candidates, select first by position (earliest elution)
+```
+
+**Why This Matters**:
+
+Without the truncation boundary, the Hungarian algorithm can match late-eluting product peaks to distant expected truncation positions, leading to incorrect classifications:
+
+```
+Example without boundary:
+  Expected: L₀=10, descendant_products=[15, 20]
+  Detected peaks: [11, 18, 85]
+
+  Hungarian algorithm might match:
+    peak@11 → L₀_position (correct)
+    peak@18 → descendant@20 (correct, within tolerance)
+    peak@85 → ???
+
+  BUT if tolerance is loose, it could incorrectly match:
+    peak@85 → descendant@20 (WRONG! Too far away)
+
+With boundary (margin=60):
+  truncation_boundary = max(10, 15, 20) + 60 = 80
+
+  peak@85 > 80 → Cannot be TRUNCATION
+  peak@85 → Reclassified as unassigned → candidate for PRODUCT
+```
+
+**Configuration**:
+
+Default: `truncation_margin = 60.0` seconds (see `src/lcseq/config.py:69`)
+
+**Recommendation**: Adjust margin based on chromatography stability:
+- **Tight tolerance** (30s): Stable LC, minimal retention shift
+- **Standard** (60s): Typical variability, discrete fractionation
+- **Loose** (120s): High variability, poor reproducibility
+
+**Trade-offs**:
+
+- **Too small**: Late-eluting truncations incorrectly classified as PRODUCT
+- **Too large**: Early-eluting products incorrectly classified as TRUNCATION
+- **Sweet spot**: Accommodates variability without over-extending truncation region
+
+**References**:
+- `src/lcseq/config.py:66-69` - Parameter definition
+- `src/lcseq/domain/services/peak_classifier.py:296-356` - Implementation
+- THEORY.md Section 5.5 - Hungarian algorithm and optimal assignment
 
 ### 5.4 Global Classification via Constraint Propagation
 
@@ -3077,7 +3559,58 @@ See [Part 2.1](#21-core-entities) for detailed definitions.
 - **Peak**: Detected chromatogram feature with position, boundaries, metrics
 - **Chromatogram**: Elution profile with time_points, counts, signal variants
 - **BuildingBlock**: Chemical block with cycle, code, null flag
-- **EquivalenceClass**: Collection of positional variants with same residue sequence (see [Part 4.2](#42-equivalence-classes-and-consensus))
+- **EquivalenceClass**: Collection of positional variants with same block support sequence (see [Part 4.2](#42-equivalence-classes-and-pooled-mode-analysis))
+- **PooledCompound**: Immutable proxy for processing pooled chromatograms (see [Part 4.2.10](#4210-pooledcompound-pooled-signal-processing-proxy))
+
+#### 8.1.1 Sequence Representations
+
+LC-Seq uses a systematic naming convention for sequences based on two dimensions: **granularity** (blocks vs monomers) and **support** (with or without nulls).
+
+**The Three Sequence Types:**
+
+1. **positional_block_sequence** (Compound property)
+   - Full synthesis path at block granularity INCLUDING null positions
+   - Example: `"Val-Null-Leu"` (3 cycles: Val at position 1, skipped position 2, Leu at position 3)
+   - Use case: Identify exact synthesis path, position-specific diagnostics
+   - Access: `compound.positional_block_sequence`
+
+2. **block_support_sequence** (Compound property, EquivalenceClass identifier)
+   - Non-null building blocks only (SUPPORT = non-zero domain)
+   - Example: `"Val-Leu"` (same chemistry as above, ignoring positional encoding)
+   - Use case: Chemical identity at block granularity, equivalence class identifier
+   - Access: `compound.block_support_sequence`
+   - **Key property**: Equivalence classes group by this sequence
+
+3. **monomer_support_sequence** (Compound property)
+   - Fully decomposed to individual monomers, no nulls
+   - Example: `"Val"` (single block) → `"Val"` (single monomer); `"ValLeu"` (dipeptide block) → `"Val-Leu"` (two monomers)
+   - Use case: Chemical identity at monomer granularity, finest resolution
+   - Access: `compound.monomer_support_sequence`
+
+**Mathematical Terminology: "Support"**
+
+- **Support** of a function = domain where function is non-zero/non-null
+- In LC-Seq: building blocks that are NOT null (skipped cycles)
+- **block_support_sequence** = projection onto support (removes nulls)
+- **positional_block_sequence** = full domain (includes nulls)
+
+**Why This Naming?**
+
+- **Consistent**: Two-dimensional taxonomy (granularity × support)
+- **Unambiguous**: No conflict with "canonical amino acids" terminology
+- **Mathematical**: "Support" is standard mathematical concept
+- **Precise**: Clearly specifies what each sequence represents
+
+**DEPRECATED Terms** (do not use):
+
+- ❌ `positional_sequence` → Use `positional_block_sequence`
+- ❌ `residue_sequence` → Use `block_support_sequence`
+- ❌ `canonical_sequence` → Use `block_support_sequence`
+- ❌ `monomer_sequence` → Use `monomer_support_sequence`
+
+**References**:
+- THEORY.md Section 2.2: Sequence Representations (detailed definitions)
+- `src/lcseq/domain/entities/compound.py`: Property implementations
 
 ### 8.2 Hierarchical Terminology
 
@@ -3148,8 +3681,8 @@ See [Part 2.1](#21-core-entities) for detailed definitions.
 
 **Variant Mode:**
 
-- INDIVIDUAL: Analyze each positional variant separately
-- CONSENSUS: Average variants by canonical sequence
+- INDIVIDUAL: Analyze each positional variant separately (default, always valid)
+- POOLED: Hybrid approach - peak detection on aggregated signal, purity on individual variants (optional optimization)
 
 **Detection Method:**
 
@@ -3163,6 +3696,48 @@ See [Part 2.1](#21-core-entities) for detailed definitions.
 - HIERARCHICAL_HYPOTHESIS: Hypothesis-based selection
 - MAX_SCORE: Maximum score decision
 - GAUSSIAN_MEAN: Use Gaussian fit mean
+
+#### 8.5.1 Pooled Mode Terminology
+
+**Key Terms:**
+
+- **Equivalence class**: Collection of positional variants with same block support sequence (chemical identity at block level)
+- **Members**: Positional variants within an equivalence class (formerly "compounds" in EquivalenceClass)
+- **Pooled signal**: Aggregated signal (mean or median) across all members of equivalence class
+- **Pooled compound**: Processing entity - either real Compound (single variant) or PooledCompound (aggregate)
+- **Quotient hierarchy**: Quotient structure where nodes are equivalence classes (via edge projection from original hierarchy)
+- **Correlation threshold**: Minimum pairwise correlation for pooling validity (default: 0.8)
+
+**IMPORTANT Distinctions:**
+
+❌ **NOT a "representative"**: Pooled compound is NOT selected from members
+✅ **Synthetic aggregate**: Pooled signal = mean/median of ALL members
+❌ **NOT stored**: PooledCompound is temporary processing artifact, discarded after pipeline execution
+✅ **Results transferred**: Detected peaks copied from pooled compound to all members
+
+**Pooled Mode Workflow:**
+
+1. Group compounds → equivalence classes (by block support sequence)
+2. Aggregate signals → pooled_chromatogram (mean/median)
+3. Validate correlation (automatic fallback if < threshold)
+4. Create PooledCompound (proxy with pooled chromatogram)
+5. Process through pipeline (peak detection, classification)
+6. Transfer results to all members (detected_peaks, selected_peak)
+7. Integrate areas on individual members (NOT pooled signal!)
+8. Compute individual purities and validation categories
+
+**Why "Pooled" not "Representative":**
+
+- **Representative** implies selection (choose one member to represent class)
+- **Pooled** implies aggregation (synthesize new signal from all members)
+- LC-Seq uses aggregation (mean/median), not selection
+- PooledCompound is synthetic entity, not a real member
+
+**References:**
+- THEORY.md Section 4.2: Equivalence Classes and Pooled Mode Analysis
+- THEORY.md Section 4.2.10: PooledCompound pattern
+- THEORY.md Section 4.2.11: Quotient hierarchy construction
+- `src/lcseq/application/use_cases/process_pooled_chromatograms.py`
 
 ### 8.6 Similarity and Ordering
 
@@ -3199,6 +3774,16 @@ See [Part 2.1](#21-core-entities) for detailed definitions.
 - **L₀ (minimal element)**: Full-null compound, descendant of ALL compounds
 - **NULL peak**: Global maximum in L₀ chromatogram (universal reference)
 - **Putative product**: Positionally consistent peak (NOT synthesis validation!)
+- **Truncation boundary**: max(truncation_positions) + truncation_margin - hard cutoff for TRUNCATION classification
+- **Truncation margin**: Absolute time margin (default: 60s) accounting for retention time variability
+
+**Truncation Boundary:**
+
+- **Purpose**: Prevent Hungarian algorithm from incorrectly assigning late-eluting peaks as truncations
+- **Definition**: `truncation_boundary = max(L₀_position, max(descendant_products)) + truncation_margin`
+- **Usage**: Peaks must elute BEFORE boundary to be classified as TRUNCATION
+- **Product constraint**: Peaks must elute AFTER boundary to be considered for PUTATIVE_PRODUCT
+- **References**: THEORY.md Section 5.3.1, `src/lcseq/config.py:66-69`
 
 ### 8.8 Synthesis Validation Terminology
 
@@ -3293,7 +3878,7 @@ See [Part 2.1](#21-core-entities) for detailed definitions.
 - **Lineage** (all related compounds)
 - **Principal Ideal** (all descendants)
 - **Principal Filter** (all ancestors)
-- **EquivalenceClass** (positional variants with same residue sequence)
+- **EquivalenceClass** (positional variants with same block support sequence)
 - **L₀** (minimal element, full-null)
 - **PUTATIVE_PRODUCT** (positionally consistent, NOT validated)
 - **VALIDATED** (synthesis succeeded with high confidence)

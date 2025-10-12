@@ -11,7 +11,7 @@ from ..bayesian_validator import BayesianValidator
 from ..purity_calculator import PurityCalculator
 from ..snr_calculator import SNRCalculator
 from .adaptive_validator import AdaptiveValidator
-from .consensus_validator import ConsensusValidator
+from .pooling_validator import PoolingValidator
 
 
 class ValidationWorkflow:
@@ -20,7 +20,7 @@ class ValidationWorkflow:
 
     Orchestrates:
     1. Dataset statistics computation (adaptive thresholds)
-    2. Consensus mode validation (if applicable)
+    2. Pooled mode validation (if applicable)
     3. Bayesian validation with adaptive thresholds
     4. Result aggregation
 
@@ -52,7 +52,7 @@ class ValidationWorkflow:
         """Initialize validation workflow with required validators."""
         self.bayesian_validator = BayesianValidator()
         self.adaptive_validator = AdaptiveValidator()
-        self.consensus_validator = ConsensusValidator()
+        self.pooling_validator = PoolingValidator()
 
     def validate_library(
         self,
@@ -299,14 +299,14 @@ class ValidationWorkflow:
             'stringency_level': stringency
         }
 
-    def validate_with_consensus_check(
+    def validate_with_pooling_check(
         self,
         compounds: List[Compound],
         hierarchy: CompoundHierarchy,
         retention_precision: float = 0.5
     ) -> Dict[str, any]:
         """
-        Validate library with consensus mode checking.
+        Validate library with pooled mode checking.
 
         Parameters
         ----------
@@ -320,30 +320,30 @@ class ValidationWorkflow:
         Returns
         -------
         Dict[str, any]
-            Validation results with consensus status
+            Validation results with pooling status
 
         Notes
         -----
         This method should be used when compounds include multiple variants
-        that need consensus checking. For single variants, use validate_library().
+        that need pooling checking. For single variants, use validate_library().
 
         Examples
         --------
-        >>> results = workflow.validate_with_consensus_check(compounds, hierarchy)
-        >>> results['consensus_report']
-        {'status': 'CONSENSUS_VALID', 'min_correlation': 0.92, ...}
+        >>> results = workflow.validate_with_pooling_check(compounds, hierarchy)
+        >>> results['pooling_report']
+        {'status': 'POOLING_VALID', 'min_correlation': 0.92, ...}
         """
         # Standard validation
         validation_results = self.validate_library(
             compounds, hierarchy, retention_precision
         )
 
-        # Add consensus information (if applicable)
-        # Note: This is a placeholder - full consensus integration would require
+        # Add pooling information (if applicable)
+        # Note: This is a placeholder - full pooling integration would require
         # chromatogram access at this level
-        validation_results['consensus_report'] = {
+        validation_results['pooling_report'] = {
             'status': 'NOT_APPLICABLE',
-            'note': 'Consensus checking requires chromatogram access'
+            'note': 'Pooling checking requires chromatogram access'
         }
 
         return validation_results

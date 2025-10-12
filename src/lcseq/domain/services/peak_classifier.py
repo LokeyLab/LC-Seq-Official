@@ -10,11 +10,6 @@ from scipy.optimize import linear_sum_assignment
 from ..entities.compound import Compound
 from ..entities.peak import Peak, PeakType
 from ..models.compound_hierarchy import CompoundHierarchy
-from ...config import (
-    DEFAULT_PEAK_MATCHING_TOLERANCE,
-    DEFAULT_TRUNCATION_MARGIN,
-    DEFAULT_HUNGARIAN_MIN_THRESHOLD,
-)
 
 
 class PeakClassifier:
@@ -72,7 +67,7 @@ class PeakClassifier:
         peak: Peak,
         hierarchy: CompoundHierarchy,
         l0_retention_time: Optional[float] = None,
-        tolerance: float = DEFAULT_PEAK_MATCHING_TOLERANCE
+        tolerance: float = 0.01
     ) -> Peak:
         """
         Classify a single peak for a compound.
@@ -152,8 +147,8 @@ class PeakClassifier:
         compound: Compound,
         hierarchy: CompoundHierarchy,
         l0_retention_time: Optional[float] = None,
-        tolerance: float = DEFAULT_PEAK_MATCHING_TOLERANCE,
-        truncation_margin: float = DEFAULT_TRUNCATION_MARGIN,
+        tolerance: float = 0.01,
+        truncation_margin: float = 60.0,
     ) -> None:
         """
         Classify all peaks for a compound in-place.
@@ -317,7 +312,7 @@ class PeakClassifier:
             for peak in invalid_truncations:
                 truncation_peaks.remove(peak)
 
-            # Unassigned peaks could be PRODUCT or UNKNOWN
+            # Unassigned peaks could be PUTATIVE_PRODUCT or UNKNOWN
             unassigned_peaks = [
                 compound.detected_peaks[i]
                 for i in range(len(compound.detected_peaks))
@@ -450,11 +445,11 @@ class PeakClassifier:
             threshold = median_spacing / signal_length
         else:
             # Fallback: use adaptive threshold if only one expected position
-            threshold = DEFAULT_PEAK_MATCHING_TOLERANCE
+            threshold = 0.01
 
         # Minimum threshold to handle LC-Seq's discrete fractionation
         # Accounts for retention time variability in discrete fraction collection
-        threshold = max(threshold, DEFAULT_HUNGARIAN_MIN_THRESHOLD)
+        threshold = max(threshold, 0.02)
 
         # Accept only assignments below or equal to threshold
         # Use <= to ensure perfect matches (cost=0.0) are accepted when threshold=0

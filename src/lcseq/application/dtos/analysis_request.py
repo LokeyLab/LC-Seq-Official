@@ -26,7 +26,7 @@ class AnalysisRequest:
     output_path : Path
         Where to save results
     variant_mode : str
-        'individual' or 'consensus' for variant handling
+        'individual' or 'pooled' for variant handling
     hierarchy_mode : str
         'building_block' or 'monomer' for hierarchy construction
     detection_params : Dict[str, Any]

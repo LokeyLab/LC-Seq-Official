@@ -52,8 +52,8 @@ class LibraryParser:
         Examples
         --------
         >>> compounds = parser.parse(Path('library.csv'))
-        >>> compounds[0].positional_sequence
-        {'pos_0': <BuildingBlock 'Leu'>, 'pos_1': <BuildingBlock 'Ala'>, ...}
+        >>> compounds[0].positional_block_sequence
+        'Leu-Ala-...'
         """
         if not file_path.exists():
             raise FileNotFoundError(f"Library file not found: {file_path}")
@@ -98,27 +98,40 @@ class LibraryParser:
         if not pos_columns:
             return None
 
-        # Build positional sequence
-        positional_sequence = {}
+        # Build building blocks list (sorted by position/cycle)
+        building_blocks_dict = {}
         for col in sorted(pos_columns):
             pos_num = int(col.split('_')[1])
             bb_code = row[col]
 
             # Handle NULL/empty positions
             if pd.isna(bb_code) or str(bb_code).upper() == 'NULL':
-                building_block = BuildingBlock.create_null()
+                building_block = BuildingBlock.create_null(cycle=pos_num)
             else:
-                # Create building block (simplified - would need cycle info)
+                # Create building block
                 building_block = BuildingBlock(
                     cycle=pos_num,
                     code=str(bb_code),
                     is_null=False
                 )
 
-            positional_sequence[f'pos_{pos_num}'] = building_block
+            building_blocks_dict[pos_num] = building_block
 
-        # Create compound
-        compound = Compound(positional_sequence=positional_sequence)
+        # Convert to sorted list (by cycle)
+        building_blocks = [building_blocks_dict[pos] for pos in sorted(building_blocks_dict.keys())]
+
+        # Create compound (Note: chromatogram would need to be added separately)
+        # This parser only handles the building block sequence from library design
+        # Chromatogram data comes from separate LC-MS files
+        from ...domain.entities.chromatogram import Chromatogram
+        import numpy as np
+
+        # Placeholder chromatogram (would be replaced with actual data)
+        placeholder_chrom = Chromatogram(
+            time_points=np.array([0.0, 1.0]),
+            counts=np.array([0.0, 0.0])
+        )
+        compound = Compound(building_blocks=building_blocks, chromatogram=placeholder_chrom)
 
         return compound
 

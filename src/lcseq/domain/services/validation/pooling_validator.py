@@ -1,5 +1,5 @@
 """
-Consensus mode validation with automatic fallback.
+Pooled mode validation with automatic fallback.
 
 Implementation based on THEORY.md Section 4.2.8.1.
 """
@@ -10,15 +10,15 @@ from ...entities.compound import Compound
 from ...entities.chromatogram import Chromatogram
 
 
-class ConsensusValidator:
+class PoolingValidator:
     """
-    Implements consensus mode validation with correlation checking.
+    Implements pooled mode validation with correlation checking.
 
     Validates that signal variants are sufficiently correlated (r > 0.8) for
-    consensus mode analysis. Provides automatic fallback to individual mode
+    pooled mode analysis. Provides automatic fallback to individual mode
     if correlation check fails.
 
-    Core Principle: Consensus mode is an optional optimization. If variants
+    Core Principle: Pooled mode is an optional optimization. If variants
     are heterogeneous (low correlation), automatically fall back to
     individual mode processing.
 
@@ -26,15 +26,15 @@ class ConsensusValidator:
     -----
     Workflow:
     1. Check correlation between all variant pairs
-    2. If min(correlation) > 0.8: CONSENSUS_VALID
+    2. If min(correlation) > 0.8: POOLING_VALID
     3. If min(correlation) ≤ 0.8: HETEROGENEOUS → fallback
     4. Process in individual mode
     5. Aggregate results with class-level status
 
     Status flags:
-    - CONSENSUS_VALID: Correlation check passed
+    - POOLING_VALID: Correlation check passed
     - HETEROGENEOUS: Correlation check failed, used individual mode
-    - CONSENSUS_INVALID_BUT_SIMILAR: Fallback successful
+    - POOLING_INVALID_BUT_SIMILAR: Fallback successful
 
     References
     ----------
@@ -42,7 +42,7 @@ class ConsensusValidator:
 
     Examples
     --------
-    >>> validator = ConsensusValidator()
+    >>> validator = PoolingValidator()
     >>> chromatograms = [chrom1, chrom2, chrom3]  # 3 variants
     >>> is_valid, min_corr = validator.check_correlation(chromatograms)
     >>> is_valid
@@ -53,12 +53,12 @@ class ConsensusValidator:
 
     def __init__(self, correlation_threshold: float = 0.8):
         """
-        Initialize consensus validator.
+        Initialize pooling validator.
 
         Parameters
         ----------
         correlation_threshold : float, optional
-            Minimum correlation required for consensus mode.
+            Minimum correlation required for pooled mode.
             Default is 0.8 (THEORY.md Section 4.2.8.1).
         """
         self.correlation_threshold = correlation_threshold
@@ -69,7 +69,7 @@ class ConsensusValidator:
         signal_key: str = "corrected"
     ) -> Tuple[bool, float]:
         """
-        Check if chromatograms are sufficiently correlated for consensus.
+        Check if chromatograms are sufficiently correlated for pooled mode.
 
         Parameters
         ----------
@@ -88,7 +88,7 @@ class ConsensusValidator:
         Notes
         -----
         Computes Pearson correlation for all pairs of chromatograms.
-        Valid for consensus if min(correlation) > 0.8.
+        Valid for pooled mode if min(correlation) > 0.8.
 
         If correlation < 0.8, signals are heterogeneous and should be
         processed individually.
@@ -106,7 +106,7 @@ class ConsensusValidator:
         0.92
         """
         if len(chromatograms) < 2:
-            # Single variant - always valid for "consensus" (trivial case)
+            # Single variant - always valid for pooling (trivial case)
             return True, 1.0
 
         # Extract signals
@@ -180,13 +180,13 @@ class ConsensusValidator:
 
         return float(correlation)
 
-    def validate_consensus_eligibility(
+    def validate_pooling_eligibility(
         self,
         chromatograms: List[Chromatogram],
         signal_key: str = "corrected"
     ) -> Dict[str, any]:
         """
-        Full validation check for consensus mode eligibility.
+        Full validation check for pooled mode eligibility.
 
         Parameters
         ----------
@@ -201,19 +201,19 @@ class ConsensusValidator:
             Validation report with keys:
             - 'is_eligible': bool
             - 'min_correlation': float
-            - 'status': str ('CONSENSUS_VALID', 'HETEROGENEOUS', etc.)
+            - 'status': str ('POOLING_VALID', 'HETEROGENEOUS', etc.)
             - 'recommendation': str (human-readable)
             - 'all_correlations': List[float] (all pairwise correlations)
 
         Examples
         --------
-        >>> report = validator.validate_consensus_eligibility(chroms)
+        >>> report = validator.validate_pooling_eligibility(chroms)
         >>> report
         {
             'is_eligible': True,
             'min_correlation': 0.92,
-            'status': 'CONSENSUS_VALID',
-            'recommendation': 'Use consensus mode - signals are highly correlated',
+            'status': 'POOLING_VALID',
+            'recommendation': 'Use pooled mode - signals are highly correlated',
             'all_correlations': [0.92, 0.95, 0.94]
         }
         """
@@ -230,9 +230,9 @@ class ConsensusValidator:
 
         # Determine status and recommendation
         if is_valid:
-            status = 'CONSENSUS_VALID'
+            status = 'POOLING_VALID'
             recommendation = (
-                f'Use consensus mode - signals are highly correlated '
+                f'Use pooled mode - signals are highly correlated '
                 f'(min r = {min_corr:.3f})'
             )
         else:
@@ -266,7 +266,7 @@ class ConsensusValidator:
         -------
         Dict[str, any]
             Aggregated results with keys:
-            - 'consensus_status': str
+            - 'pooling_status': str
             - 'variant_count': int
             - 'validated_count': int
             - 'validation_fraction': float
@@ -281,7 +281,7 @@ class ConsensusValidator:
         >>> results = validator.aggregate_individual_results(compounds)
         >>> results
         {
-            'consensus_status': 'CONSENSUS_INVALID_BUT_SIMILAR',
+            'pooling_status': 'POOLING_INVALID_BUT_SIMILAR',
             'variant_count': 3,
             'validated_count': 3,
             'validation_fraction': 1.0
@@ -300,16 +300,16 @@ class ConsensusValidator:
             validated_count / variant_count if variant_count > 0 else 0.0
         )
 
-        # Determine consensus status based on validation fraction
+        # Determine pooling status based on validation fraction
         if validation_fraction >= 0.8:
-            consensus_status = 'CONSENSUS_INVALID_BUT_SIMILAR'
+            pooling_status = 'POOLING_INVALID_BUT_SIMILAR'
         elif validation_fraction >= 0.5:
-            consensus_status = 'HETEROGENEOUS_MIXED'
+            pooling_status = 'HETEROGENEOUS_MIXED'
         else:
-            consensus_status = 'HETEROGENEOUS_POOR'
+            pooling_status = 'HETEROGENEOUS_POOR'
 
         return {
-            'consensus_status': consensus_status,
+            'pooling_status': pooling_status,
             'variant_count': variant_count,
             'validated_count': validated_count,
             'validation_fraction': validation_fraction

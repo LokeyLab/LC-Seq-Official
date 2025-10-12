@@ -7,6 +7,7 @@ Implementation based on THEORY.md Part 5, 6.
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 from enum import Enum
+from .compound_hierarchy import HierarchyMode
 
 
 class AnalysisMode(Enum):
@@ -17,28 +18,12 @@ class AnalysisMode(Enum):
     ----------
     INDIVIDUAL : str
         Process each positional variant independently (default)
-    CONSENSUS : str
+    POOLED : str
         Aggregate positional variants by equivalence class (optional optimization)
     """
 
     INDIVIDUAL = "individual"
-    CONSENSUS = "consensus"
-
-
-class HierarchyMode(Enum):
-    """
-    Hierarchy construction mode.
-
-    Attributes
-    ----------
-    BUILDING_BLOCK : str
-        Building-block level (forest structure)
-    MONOMER : str
-        Monomer level (DAG with convergence)
-    """
-
-    BUILDING_BLOCK = "building_block"
-    MONOMER = "monomer"
+    POOLED = "pooled"
 
 
 @dataclass
@@ -52,7 +37,7 @@ class AnalysisConfiguration:
     Attributes
     ----------
     analysis_mode : AnalysisMode
-        Individual or consensus mode
+        Individual or pooled mode
     hierarchy_mode : HierarchyMode
         Building-block or monomer hierarchy
     peak_detection_params : Dict[str, Any]
@@ -76,10 +61,10 @@ class AnalysisConfiguration:
     >>> config.analysis_mode
     <AnalysisMode.INDIVIDUAL: 'individual'>
 
-    >>> # Consensus mode configuration
-    >>> config_consensus = AnalysisConfiguration.default()
-    >>> config_consensus.analysis_mode = AnalysisMode.CONSENSUS
-    >>> config_consensus.validation_params['correlation_threshold'] = 0.8
+    >>> # Pooled mode configuration
+    >>> config_pooled = AnalysisConfiguration.default()
+    >>> config_pooled.analysis_mode = AnalysisMode.POOLED
+    >>> config_pooled.validation_params['correlation_threshold'] = 0.8
 
     References
     ----------
@@ -122,8 +107,8 @@ class AnalysisConfiguration:
             if key not in self.validation_params:
                 self.validation_params[key] = value
 
-        # Add correlation threshold for consensus mode
-        if self.analysis_mode == AnalysisMode.CONSENSUS:
+        # Add correlation threshold for pooled mode
+        if self.analysis_mode == AnalysisMode.POOLED:
             if "correlation_threshold" not in self.validation_params:
                 self.validation_params["correlation_threshold"] = 0.8
 
@@ -160,36 +145,36 @@ class AnalysisConfiguration:
         return cls()
 
     @classmethod
-    def for_consensus_mode(
+    def for_pooled_mode(
         cls, correlation_threshold: float = 0.8
     ) -> "AnalysisConfiguration":
         """
-        Create configuration for consensus mode analysis.
+        Create configuration for pooled mode analysis.
 
         Parameters
         ----------
         correlation_threshold : float
-            Minimum correlation for consensus validity (default 0.8)
+            Minimum correlation for pooling validity (default 0.8)
 
         Returns
         -------
         AnalysisConfiguration
-            Configuration with consensus mode enabled
+            Configuration with pooled mode enabled
 
         Notes
         -----
-        Consensus mode requires high correlation between positional variants
+        Pooled mode requires high correlation between positional variants
         (THEORY.md Section 4.2.4).
 
         Examples
         --------
-        >>> config = AnalysisConfiguration.for_consensus_mode(correlation_threshold=0.85)
+        >>> config = AnalysisConfiguration.for_pooled_mode(correlation_threshold=0.85)
         >>> config.analysis_mode
-        <AnalysisMode.CONSENSUS: 'consensus'>
+        <AnalysisMode.POOLED: 'pooled'>
         >>> config.validation_params['correlation_threshold']
         0.85
         """
-        config = cls(analysis_mode=AnalysisMode.CONSENSUS)
+        config = cls(analysis_mode=AnalysisMode.POOLED)
         config.validation_params["correlation_threshold"] = correlation_threshold
         return config
 

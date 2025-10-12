@@ -6,6 +6,7 @@ Exports analysis results to CSV format for easy viewing and processing.
 
 import pandas as pd
 from pathlib import Path
+from typing import Dict
 from ...application.dtos.analysis_response import AnalysisResponse
 
 
@@ -163,8 +164,6 @@ class CSVExporter:
             'stats': Path('results/dataset_statistics.csv')
         }
         """
-        from typing import Dict
-
         paths = {}
         paths['compound_results'] = self.export(response, output_dir)
         paths['summary'] = self.export_summary(response, output_dir)

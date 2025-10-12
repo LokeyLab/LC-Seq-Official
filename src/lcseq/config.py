@@ -1,155 +1,79 @@
 """
-LC-Seq Configuration - Centralized parameter defaults.
+LC-Seq Configuration - Single Source of Truth from configs/default.yaml
 
-All default parameters for peak detection, filtering, and analysis are defined here.
-Modify values in this file to change behavior across the entire codebase.
+This module loads configuration from configs/default.yaml and provides
+convenient access to parameters throughout the codebase.
 
-USAGE
------
-To change default parameters, simply edit the values in the classes below.
-Changes will automatically propagate to:
-  - PeakDetector.detect_peaks()
-  - ProcessChromatogramsUseCase.execute()
-  - ProcessChromatogramsWithIntegrationUseCase.execute()
-  - LineageOffsetPlotter.plot()
-
-EXAMPLE
--------
-To disable local SNR filtering globally:
-    MIN_SNR = 0.0
-
-To make baseline filter more strict:
-    MIN_BASELINE_SDS = 2.0  # Require 2 SDs above minimum
-
-To retain only top 90% most prominent peaks:
-    PROMINENCE_PERCENTILE = 0.1  # Lower = more strict
-
-CURRENT CONFIGURATION
----------------------
-See PeakDetectionConfig and VisualizationConfig classes below.
+ALL configuration values come from the YAML file - no hardcoded defaults.
 """
 
-# =============================================================================
-# Peak Detection Parameters
-# =============================================================================
+from lcseq.infrastructure.configuration.yaml_loader import ConfigurationLoader
+
+# Load configuration from Single Source of Truth (configs/default.yaml)
+# This happens once on module import
+_DEFAULT_CONFIG = ConfigurationLoader.get_default_config()
+
+# Peak Detection Parameters (from configs/default.yaml)
+DEFAULT_Z_THRESHOLD = _DEFAULT_CONFIG.peak_detection_params.get("z_threshold", 3.0)
+DEFAULT_PROMINENCE_PERCENTILE = _DEFAULT_CONFIG.peak_detection_params.get("prominence_percentile", 0.5)
+DEFAULT_MIN_SNR = _DEFAULT_CONFIG.peak_detection_params.get("min_snr", 0.001)
+DEFAULT_MIN_BASELINE_SDS = _DEFAULT_CONFIG.peak_detection_params.get("min_baseline_sds", 1.0)
+DEFAULT_SIGNAL_VARIANT = _DEFAULT_CONFIG.peak_detection_params.get("signal_variant", "raw")
+
+# Peak Classification Parameters (from configs/default.yaml)
+DEFAULT_TRUNCATION_MARGIN = _DEFAULT_CONFIG.classification_params.get("truncation_margin", 60.0)
+DEFAULT_PEAK_MATCHING_TOLERANCE = _DEFAULT_CONFIG.classification_params.get("peak_matching_tolerance", 0.01)
+DEFAULT_HUNGARIAN_MIN_THRESHOLD = _DEFAULT_CONFIG.classification_params.get("hungarian_min_threshold", 0.02)
+
+# Pooling Parameters (from configs/default.yaml)
+DEFAULT_CORRELATION_THRESHOLD = _DEFAULT_CONFIG.validation_params.get("correlation_threshold", 0.8)
+DEFAULT_AGGREGATION_METHOD = _DEFAULT_CONFIG.validation_params.get("aggregation_method", "mean")
 
 
+# Visualization Config Classes (backwards compatibility)
 class PeakDetectionConfig:
-    """Peak detection and filtering parameters."""
-
-    # Poisson Z-score threshold for statistical significance
-    # Z > 3.0 corresponds to p < 0.001 (highly significant)
-    Z_THRESHOLD = 3.0
-
-    # Prominence percentile threshold
-    # 0.2 = retain top 80% most prominent peaks
-    # Lower value = more strict (fewer peaks retained)
-    # Set to 0.0 to disable (retain all peaks)
-    PROMINENCE_PERCENTILE = 0.5
-
-    # Local SNR filter (adaptive threshold)
-    # Threshold = min(SNRs) + MIN_SNR * std(SNRs)
-    # Set to 0.0 to disable local SNR filtering
-    # NOTE: This threshold is NOT visualized (it would be misleading)
-    # DISABLED for now since it can't be accurately visualized
-    MIN_SNR = 0.001
-
-    # Global baseline filter (in standard deviations)
-    # Peak height must exceed: min(signal) + MIN_BASELINE_SDS * std(signal)
-    # Set to 0.0 to disable global baseline filtering
-    MIN_BASELINE_SDS = 1.0
-
-    # Signal variant to use for detection
-    # "raw" = no baseline correction, no smoothing (per THEORY.md)
-    SIGNAL_VARIANT = "raw"
-
-    # Truncation boundary margin (in seconds)
-    # Product peaks must be this far beyond max(truncation_positions)
-    # Accounts for retention time variability in peak matching
-    TRUNCATION_MARGIN = 60.0
-
-    # Peak matching tolerance (relative fraction)
-    # Used for Hungarian algorithm and position matching
-    # Relative tolerance: |measured - expected| / expected
-    PEAK_MATCHING_TOLERANCE = 0.01
-
-    # Minimum threshold for Hungarian algorithm (fraction of signal length)
-    # Accounts for discrete fractionation in LC-Seq
-    HUNGARIAN_MIN_THRESHOLD = 0.02
-
-
-# =============================================================================
-# Visualization Parameters
-# =============================================================================
+    """Peak detection parameters from configs/default.yaml"""
+    Z_THRESHOLD = DEFAULT_Z_THRESHOLD
+    PROMINENCE_PERCENTILE = DEFAULT_PROMINENCE_PERCENTILE
+    MIN_SNR = DEFAULT_MIN_SNR
+    MIN_BASELINE_SDS = DEFAULT_MIN_BASELINE_SDS
+    SIGNAL_VARIANT = DEFAULT_SIGNAL_VARIANT
+    TRUNCATION_MARGIN = DEFAULT_TRUNCATION_MARGIN
+    PEAK_MATCHING_TOLERANCE = DEFAULT_PEAK_MATCHING_TOLERANCE
+    HUNGARIAN_MIN_THRESHOLD = DEFAULT_HUNGARIAN_MIN_THRESHOLD
 
 
 class VisualizationConfig:
-    """Visualization parameters for lineage plots."""
-
+    """Visualization parameters from configs/default.yaml"""
     # Layout parameters
-    SECONDS_PER_MINUTE = 60.0  # Time conversion factor
-    OFFSET_SPACING = 0.5  # Normal vertical spacing between compounds
-    GROUP_SPACING_EXTRA = 1.0  # Extra spacing between different canonical sequence groups
+    SECONDS_PER_MINUTE = _DEFAULT_CONFIG.peak_detection_params.get("viz_seconds_per_minute", 60.0)
+    OFFSET_SPACING = _DEFAULT_CONFIG.peak_detection_params.get("viz_offset_spacing", 0.5)
+    GROUP_SPACING_EXTRA = _DEFAULT_CONFIG.peak_detection_params.get("viz_group_spacing_extra", 1.0)
 
     # Color parameters
-    USE_COLORMAP = True  # True = rainbow colormap by canonical sequence, False = all black
-    # When True, chemically identical compounds (same canonical sequence) get the same color
-    # Colors assigned using rainbow colormap, organized by level then sorted by sequence
-    # When False, all signals and markers are black (publication-ready)
+    USE_COLORMAP = _DEFAULT_CONFIG.peak_detection_params.get("viz_use_colormap", True)
 
-    # Line styling parameters
-    LINEWIDTH_DEFAULT = 1.5  # Default trace line width
-    LINEWIDTH_REFERENCE = 3.0  # Reference compound line width (thicker)
-    ALPHA_TRACE = 1.0  # Trace transparency (1.0 = opaque)
+    # Line styling
+    LINEWIDTH_DEFAULT = _DEFAULT_CONFIG.peak_detection_params.get("viz_linewidth_default", 1.5)
+    LINEWIDTH_REFERENCE = _DEFAULT_CONFIG.peak_detection_params.get("viz_linewidth_reference", 3.0)
+    ALPHA_TRACE = _DEFAULT_CONFIG.peak_detection_params.get("viz_alpha_trace", 1.0)
 
     # Marker parameters
-    MARKER_SIZE = 6  # Peak marker size
+    MARKER_SIZE = _DEFAULT_CONFIG.peak_detection_params.get("viz_marker_size", 6)
 
     # Text parameters
-    LABEL_FONTSIZE = 10  # Sequence label font size
-    LABEL_MAX_LENGTH = 40  # Maximum label length before truncation
-    LABEL_TRUNCATE_LENGTH = 4  # Number of characters to show when truncating
+    LABEL_FONTSIZE = _DEFAULT_CONFIG.peak_detection_params.get("viz_label_fontsize", 10)
+    LABEL_MAX_LENGTH = _DEFAULT_CONFIG.peak_detection_params.get("viz_label_max_length", 40)
+    LABEL_TRUNCATE_LENGTH = _DEFAULT_CONFIG.peak_detection_params.get("viz_label_truncate_length", 4)
 
     # Figure dimensions
-    FIG_WIDTH = 16  # Figure width in inches
-    FIG_HEIGHT_BASE = 4  # Base figure height
-    FIG_HEIGHT_PER_TRACE = 0.4  # Additional height per trace
-    FIG_HEIGHT_MIN = 10  # Minimum figure height
+    FIG_WIDTH = _DEFAULT_CONFIG.peak_detection_params.get("viz_fig_width", 16)
+    FIG_HEIGHT_BASE = _DEFAULT_CONFIG.peak_detection_params.get("viz_fig_height_base", 4)
+    FIG_HEIGHT_PER_TRACE = _DEFAULT_CONFIG.peak_detection_params.get("viz_fig_height_per_trace", 0.4)
+    FIG_HEIGHT_MIN = _DEFAULT_CONFIG.peak_detection_params.get("viz_fig_height_min", 10)
 
 
-# =============================================================================
-# Consensus Mode Parameters
-# =============================================================================
-
-
-class ConsensusConfig:
-    """Consensus mode parameters for positional variant aggregation."""
-
-    # Correlation threshold for validity
-    # Variants must have min(pairwise correlation) > threshold
-    # Recommended: 0.8 (strong similarity required)
-    CORRELATION_THRESHOLD = 0.0
-
-    # Aggregation method for consensus signal
-    # "mean" = faster, smoother (recommended)
-    # "median" = more robust to outliers
-    AGGREGATION_METHOD = "mean"
-
-
-# =============================================================================
-# Easy access to default parameters
-# =============================================================================
-
-# Peak detection defaults (for convenience)
-DEFAULT_Z_THRESHOLD = PeakDetectionConfig.Z_THRESHOLD
-DEFAULT_PROMINENCE_PERCENTILE = PeakDetectionConfig.PROMINENCE_PERCENTILE
-DEFAULT_MIN_SNR = PeakDetectionConfig.MIN_SNR
-DEFAULT_MIN_BASELINE_SDS = PeakDetectionConfig.MIN_BASELINE_SDS
-DEFAULT_SIGNAL_VARIANT = PeakDetectionConfig.SIGNAL_VARIANT
-DEFAULT_TRUNCATION_MARGIN = PeakDetectionConfig.TRUNCATION_MARGIN
-DEFAULT_PEAK_MATCHING_TOLERANCE = PeakDetectionConfig.PEAK_MATCHING_TOLERANCE
-DEFAULT_HUNGARIAN_MIN_THRESHOLD = PeakDetectionConfig.HUNGARIAN_MIN_THRESHOLD
-
-# Consensus mode defaults (for convenience)
-DEFAULT_CORRELATION_THRESHOLD = ConsensusConfig.CORRELATION_THRESHOLD
-DEFAULT_AGGREGATION_METHOD = ConsensusConfig.AGGREGATION_METHOD
+class PoolingConfig:
+    """Pooling parameters from configs/default.yaml"""
+    CORRELATION_THRESHOLD = DEFAULT_CORRELATION_THRESHOLD
+    AGGREGATION_METHOD = DEFAULT_AGGREGATION_METHOD

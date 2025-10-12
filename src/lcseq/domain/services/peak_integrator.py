@@ -16,7 +16,7 @@ class PeakIntegrator:
 
     This service handles precise peak area integration and boundary determination,
     typically used after initial peak detection or when integrating on individual
-    variants using consensus boundaries.
+    variants using pooled boundaries.
 
     This is a stateless service - all methods are operations on input data with
     no instance state.
@@ -30,7 +30,7 @@ class PeakIntegrator:
     4. Return boundaries and area for further analysis
 
     Used in:
-    - Consensus mode: Integrate individual variants using consensus boundaries
+    - Pooled mode: Integrate individual variants using pooled boundaries
     - Peak refinement: Re-integrate peaks with different boundary criteria
     - Area calculation: Compute areas for purity analysis
 
@@ -83,7 +83,7 @@ class PeakIntegrator:
 
         Notes
         -----
-        If boundaries are provided (e.g., from consensus detection), they are
+        If boundaries are provided (e.g., from pooled detection), they are
         used directly. Otherwise, boundaries are detected using valley method
         or 5% threshold.
 
@@ -91,7 +91,7 @@ class PeakIntegrator:
 
         References
         ----------
-        THEORY.md Section 4.2.6: Consensus Mode Area Integration
+        THEORY.md Section 4.2.6: Pooled Mode Area Integration
         THEORY.md Section 5.0.7: Peak Area Integration
 
         Examples
@@ -99,7 +99,7 @@ class PeakIntegrator:
         >>> integrator = PeakIntegrator()
         >>> # Auto-detect boundaries
         >>> left, right, area = integrator.integrate_peak(chrom, peak_position=120.0)
-        >>> # Use fixed boundaries (e.g., from consensus)
+        >>> # Use fixed boundaries (e.g., from pooled mode)
         >>> left, right, area = integrator.integrate_peak(
         ...     chrom, peak_position=120.0,
         ...     left_boundary=115.0, right_boundary=125.0
@@ -119,7 +119,7 @@ class PeakIntegrator:
 
         # Determine boundaries
         if left_boundary is not None and right_boundary is not None:
-            # Use provided boundaries (e.g., from consensus mode)
+            # Use provided boundaries (e.g., from pooled mode)
             left_idx = self._find_nearest_index(time_points, left_boundary)
             right_idx = self._find_nearest_index(time_points, right_boundary)
         else:

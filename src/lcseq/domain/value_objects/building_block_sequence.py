@@ -207,7 +207,7 @@ class BuildingBlockSequence:
 
     def to_residue_string(self) -> str:
         """
-        Convert to residue sequence string (non-null blocks only).
+        Convert to block support sequence string (non-null blocks only).
 
         Returns
         -------
@@ -217,9 +217,9 @@ class BuildingBlockSequence:
 
         Notes
         -----
-        This is the canonical/residue sequence used for grouping
+        This is the block support sequence used for grouping
         positional variants. Multiple positional sequences can have
-        the same residue sequence.
+        the same block support sequence.
 
         Examples
         --------
@@ -229,7 +229,7 @@ class BuildingBlockSequence:
 
         References
         ----------
-        THEORY.md Section 2.2: Canonical Sequence definition
+        THEORY.md Section 2.2: Block Support Sequence definition
         """
         non_null = self.get_non_null_blocks()
         # Reverse for N→C display

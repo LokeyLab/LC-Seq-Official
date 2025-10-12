@@ -3,5 +3,6 @@
 from .csv_exporter import CSVExporter
 from .excel_exporter import ExcelExporter
 from .report_generator import ReportGenerator
+from .json_exporter import JSONExporter
 
-__all__ = ['CSVExporter', 'ExcelExporter', 'ReportGenerator']
+__all__ = ['CSVExporter', 'ExcelExporter', 'ReportGenerator', 'JSONExporter']

@@ -23,7 +23,7 @@ Algorithm Services
 - SNRCalculator: Single-source-of-truth SNR calculation (THEORY.md 6.5)
 - SequenceSimilarityAnalyzer: Sequence distance metrics (Levenshtein, etc.)
 - CompoundSimilarityAnalyzer: Chromatographic similarity (Wasserstein, etc.)
-- SignalAggregator: Consensus signal aggregation for positional variants (THEORY.md 4.2.4)
+- SignalAggregator: Pooled signal aggregation for positional variants (THEORY.md 4.2.4)
 
 References
 ----------
@@ -50,7 +50,7 @@ from .compound_similarity import CompoundSimilarityAnalyzer
 from .compound_search import CompoundSearchService
 from .lineage_finder import LineageFinderService
 from .compound_ordering import CompoundOrderingService
-from .consensus.signal_aggregator import SignalAggregator
+from .pooling.signal_aggregator import SignalAggregator
 
 __all__ = [
     "HierarchyBuilder",
