@@ -1,0 +1,7 @@
+"""Consensus mode services for LC-Seq."""
+
+from .signal_aggregator import SignalAggregator
+
+__all__ = [
+    "SignalAggregator",
+]

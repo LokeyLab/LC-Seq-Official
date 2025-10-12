@@ -1,0 +1,45 @@
+# LC-Seq Standard Configuration
+#
+# This is the default configuration that follows THEORY.md specifications.
+# Use this for most DEL chromatography analysis workflows.
+
+analysis:
+  # Variant mode: how to handle positional variants
+  # - individual: analyze each variant separately (recommended)
+  # - consensus: aggregate variants, fallback to individual if correlation < 0.8
+  variant_mode: individual
+
+  # Hierarchy mode: compound relationship structure
+  # - block: building-block-level hierarchy (forest structure)
+  # - monomer: monomer-level hierarchy (DAG with convergence)
+  hierarchy_mode: block
+
+detection:
+  # Minimum persistence threshold for peak detection
+  # THEORY.md Section 5.2: filters topologically insignificant peaks
+  # Range: 0.01 - 0.1 (5% recommended)
+  min_persistence: 0.05
+
+  # Peak boundary detection method
+  # THEORY.md Section 5.2.4:
+  # - valley_or_5pct: use valleys, fallback to 5% height threshold
+  # - valley_only: require valley detection
+  # - threshold_only: always use 5% threshold
+  boundary_method: valley_or_5pct
+
+validation:
+  # Purity threshold mode
+  # THEORY.md Section 6.4: adaptive thresholds from dataset distribution
+  # - auto: use P₂₅ percentile from dataset
+  # - strict: use P₅₀ percentile
+  # - lenient: use P₁₀ percentile
+  # - <float>: explicit threshold value
+  purity_threshold: auto
+
+  # Signal-to-noise ratio threshold mode
+  # THEORY.md Section 6.5: dataset-relative thresholds
+  # - auto: use P₅₀ percentile from dataset
+  # - strict: use P₇₅ percentile
+  # - lenient: use P₂₅ percentile
+  # - <float>: explicit threshold value
+  snr_threshold: auto

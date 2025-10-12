@@ -1,0 +1,23 @@
+# LC-Seq Monomer Mode Configuration
+#
+# Use this configuration when you need monomer-level hierarchy analysis.
+# This creates a DAG structure where compounds with the same monomer
+# sequence (but different building blocks) converge.
+#
+# Useful for analyzing composite building blocks (dimers, trimers).
+#
+# See THEORY.md Section 4.3 for monomer mode details.
+
+analysis:
+  variant_mode: individual
+
+  # Monomer-level hierarchy (DAG with convergence)
+  hierarchy_mode: monomer
+
+detection:
+  min_persistence: 0.05
+  boundary_method: valley_or_5pct
+
+validation:
+  purity_threshold: auto
+  snr_threshold: auto
