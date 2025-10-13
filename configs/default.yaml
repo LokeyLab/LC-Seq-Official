@@ -12,15 +12,16 @@
 analysis:
   # Variant mode: how to handle positional variants
   # - individual: analyze each variant separately (default)
-  # - pooled: aggregate variants, fallback if correlation < threshold
+  # - pooled: aggregate variants
   # Reference: THEORY.md Section 4.2
   variant_mode: individual
 
   # Hierarchy mode: compound relationship structure
-  # - building_block: DAG with convergence at block granularity
+  # - building_block: DAG with convergence at block granularity (default)
   #   (positional variants with same blocks converge)
   # - monomer: DAG with convergence at monomer granularity
   #   (positional variants with same monomers converge)
+  #   (DOES NOT RESPECT SYNTHESIS PATHS)
   # Reference: THEORY.md Section 3.3, 4.2.2, 4.2.3
   hierarchy_mode: building_block
 
@@ -80,7 +81,7 @@ classification:
   # Product peaks must be this far beyond max(truncation_positions)
   # Accounts for retention time variability in peak matching
   # Reference: THEORY.md Section 5.4
-  truncation_margin: 60.0
+  truncation_margin: 30.0
 
   # Peak matching tolerance (relative fraction)
   # Used for Hungarian algorithm and position matching
