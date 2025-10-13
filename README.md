@@ -5,14 +5,14 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A Python package for analyzing chromatography data from DNA-encoded library (DEL) screens. LC-Seq provides mathematically rigorous peak detection, hierarchical truncation analysis, and adaptive synthesis validation based on Discrete Morse Theory, DAG-based classification, and Bayesian validation.
+A Python package for analyzing chromatography data from DNA-encoded library (DEL) screens. LC-Seq provides mathematically rigorous peak detection, hierarchical truncation analysis, and adaptive synthesis validation based on Discrete Morse Theory, DAG-based classification, synthestic efficiency assessment (currently under development), and Bayesian validation of synthesis success (currently under development).
 
 ## Features
 
 - 🔬 **Rigorous Peak Detection**: Discrete Morse Theory for local maxima detection with Poisson statistics for significance testing
-- 📊 **Adaptive Validation**: Dataset-relative thresholds with Bayesian confidence assessment (no magic numbers!)
+- 📊 **Adaptive Validation**: Dataset-relative thresholds with Bayesian confidence assessment
 - 🌳 **Hierarchical Analysis**: DAG-based truncation analysis with automatic ancestor-descendant relationships
-- 🎯 **Pooled Mode**: Hybrid strategy for positional variant aggregation with automatic correlation-based fallback
+- 🎯 **Pooled Mode**: Hybrid strategy for positional variant aggregation which increases processing speed and reduces the effects of signal noise
 - 🏗️ **Clean Architecture**: Clear separation of domain, application, infrastructure, and presentation layers
 - 🔒 **Type-Safe**: Full type hints with mypy strict mode compatibility
 - 📚 **Comprehensive Theory**: 2,270-line [THEORY.md](docs/THEORY.md) documenting mathematical foundations
@@ -51,17 +51,18 @@ pip install lcseq
 The script supports **4 analysis modes** (2 variant modes × 2 hierarchy modes):
 
 ```bash
-# 1. Individual + Monomer (default) - Full detail, chemical identity focus
-python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode monomer --variant-mode individual
-
-# 2. Individual + Building-Block - Full detail, synthesis position focus
+# Individual + Building-Block - Full detail, synthesis position focus (default)
 python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode building_block
 
-# 3. Pooled + Monomer - Fast processing, chemical identity focus
+# Pooled + Building-Block - Fast processing, synthesis position focus (fastest)
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled --hierarchy-mode building_block
+
+# Individual + Monomer - High detail, chemical identity focus (slowest, does not respect synthesis path)
+python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode monomer --variant-mode individual
+
+# Pooled + Monomer - Fast processing, chemical identity focus (does not respect synthesis path)
 python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled --hierarchy-mode monomer
 
-# 4. Pooled + Building-Block - Fast processing, synthesis position focus
-python examples/analyze.py --reference "Phe-DNvl-DPhe" --variant-mode pooled --hierarchy-mode building_block
 ```
 
 **Data Requirements**: The example script works with the included test dataset (`test_data/processed_data.h5`). To use your own data, format it as HDF5 with the same structure (see [examples/README.md](examples/README.md) for details).
