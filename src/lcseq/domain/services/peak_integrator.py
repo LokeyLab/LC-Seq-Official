@@ -53,9 +53,10 @@ class PeakIntegrator:
         self,
         chromatogram: Chromatogram,
         peak_position: float,
-        signal_variant: str = "raw",
+        signal_variant: str,
+        boundary_threshold_fraction: float,
         left_boundary: float | None = None,
-        right_boundary: float | None = None
+        right_boundary: float | None = None,
     ) -> Tuple[float, float, float]:
         """
         Integrate peak area at given position.
@@ -124,7 +125,9 @@ class PeakIntegrator:
             right_idx = self._find_nearest_index(time_points, right_boundary)
         else:
             # Auto-detect boundaries
-            left_idx, right_idx = self._find_valley_boundaries(signal, peak_idx)
+            left_idx, right_idx = self._find_valley_boundaries(
+                signal, peak_idx, boundary_threshold_fraction
+            )
 
         # Get boundary times
         left_base = float(time_points[left_idx])
@@ -139,7 +142,7 @@ class PeakIntegrator:
         self,
         signal: NDArray[np.float64],
         peak_idx: int,
-        threshold_fraction: float = 0.05
+        threshold_fraction: float,
     ) -> Tuple[int, int]:
         """
         Find peak boundaries using valley detection or 5% threshold.

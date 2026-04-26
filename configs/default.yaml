@@ -14,7 +14,7 @@ analysis:
   # - individual: analyze each variant separately (default)
   # - pooled: aggregate variants
   # Reference: THEORY.md Section 4.2
-  variant_mode: individual
+  variant_mode: pooled
 
   # Hierarchy mode: compound relationship structure
   # - building_block: DAG with convergence at block granularity (default)
@@ -26,6 +26,31 @@ analysis:
   hierarchy_mode: building_block
 
 # =============================================================================
+# Performance Settings
+# =============================================================================
+performance:
+  # Number of parallel workers for peak detection
+  # - null or 1: Sequential processing (default, safest)
+  # - >1: Use specified number of parallel workers
+  # - -1: Use all available CPU cores
+  # Parallel processing provides 4-8x speedup for large datasets (1000+ compounds)
+  num_workers: null
+
+# =============================================================================
+# Signal Preprocessing Parameters
+# =============================================================================
+preprocessing:
+  # Enable signal preprocessing (baseline correction)
+  # When enabled, creates "corrected" signal variant on chromatograms
+  enabled: true
+
+  # Baseline correction parameters
+  # Uses local minima + smoothed spline fitting
+  baseline_order: 3 # Order for local minima detection (higher = fewer minima)
+  baseline_smoothing: null # Spline smoothing factor (null = auto)
+  include_endpoints: true # Include start/end as virtual minima
+
+# =============================================================================
 # Peak Detection Parameters
 # =============================================================================
 detection:
@@ -35,11 +60,18 @@ detection:
   # Reference: THEORY.md Section 5.2
   min_persistence: 0.05
 
-  # Poisson Z-score threshold for statistical significance
-  # Z > 3.0 corresponds to p < 0.001 (highly significant)
-  # Used to identify peaks that are statistically unlikely to be noise
-  # Reference: THEORY.md Section 5.1
-  z_threshold: 3.0
+  # Significance level (false positive rate) for general peak acceptance
+  # More permissive - accepts peaks for purity calculation
+  # alpha = 0.01 means 1% chance of false positive per test
+  # Uses Negative Binomial test (handles overdispersion)
+  # Reference: THEORY.md Section 5.2
+  alpha: 0.0001
+
+  # Significance level for product peak selection (stricter)
+  # Product candidates must have p_value < alpha_product
+  # Stricter than alpha to ensure high confidence in product identification
+  # Set equal to alpha to disable separate product filtering
+  alpha_product: 0.0001
 
   # Prominence percentile threshold
   # Retains only the most prominent peaks (top X%)
@@ -47,31 +79,56 @@ detection:
   # 0.0 = disable (retain all peaks)
   # Lower value = more strict (fewer peaks retained)
   # Reference: THEORY.md Section 5.2.3
-  prominence_percentile: 0.5
+  prominence_percentile: 0.0
 
   # Local SNR filter threshold multiplier
   # Threshold = min(SNRs) + min_snr * std(SNRs)
-  # Set to 0.0 to disable local SNR filtering
-  # Note: Currently not visualized (would be misleading)
-  min_snr: 0.001
+  # Set > 0 to enable as additional filter
+  min_snr: 0.00
 
   # Global baseline filter (in standard deviations)
-  # Peak height must exceed: min(signal) + min_baseline_sds * std(signal)
-  # Set to 0.0 to disable global baseline filtering
+  # Peak height must exceed: baseline + min_baseline_sds * noise_std
+  # Disabled by default (0.0) - Z-score handles "above background" significance
+  # Set > 0 to enable as additional filter
   # Reference: THEORY.md Section 5.1.2
-  min_baseline_sds: 1.0
+  min_baseline_sds: 3.0
+
+  # Sigma for sigma-clipping baseline estimation
+  # Used to identify and exclude peaks when estimating baseline/noise
+  # σ=2.0 corresponds to 95% confidence interval (standard outlier threshold)
+  # Range: 1.0 (68% CI, permissive) to 3.0 (99.7% CI, strict)
+  # Reference: THEORY.md Section 5.1
+  sigma_clip_sigma: 2.0
+
+  # Minimum dispersion parameter floor for NB significance testing
+  # (Negative Binomial is the only significance testing method - it's the most principled)
+  # Prevents numerical issues when r is very small.
+  # r = 0.1 allows significant overdispersion (Var ≈ 10×Mean at μ=1)
+  # r = 1e6 effectively forces Poisson-like behavior
+  # Reference: THEORY.md Section 5.2
+  min_dispersion_r: 1e6
 
   # Peak boundary detection method
-  # - valley_or_5pct: use valleys, fallback to 5% height threshold (recommended)
+  # - valley_or_5pct: use valleys, fallback to threshold (recommended)
   # - valley_only: require valley detection
-  # - threshold_only: always use 5% threshold
+  # - threshold_only: always use threshold
   # Reference: THEORY.md Section 5.2.4
   boundary_method: valley_or_5pct
 
+  # Boundary threshold fraction (fraction of peak height)
+  # Used when boundary_method includes threshold fallback
+  # Reference: THEORY.md Section 5.2.4
+  boundary_threshold_fraction: 0.05
+
   # Signal variant to use for detection
-  # "raw" = no baseline correction, no smoothing (per THEORY.md)
-  # This is the canonical signal for detection
-  signal_variant: raw
+  # "corrected" = baseline corrected via local minima + spline (recommended when preprocessing enabled)
+  # "raw" = no preprocessing
+  signal_variant: corrected
+
+  # Include rejected peaks in output
+  # true = include peaks that failed significance tests (for debugging)
+  # false = only include significant peaks (default)
+  include_rejected: false
 
 # =============================================================================
 # Peak Classification Parameters
@@ -132,6 +189,45 @@ validation:
   # - <float>: explicit threshold value (e.g., 10.0)
   # Reference: THEORY.md Section 6.5
   snr_threshold: auto
+
+  # Retention time precision (in minutes) for peak matching
+  # Used in validation workflow for comparing expected vs observed RT
+  retention_precision: 0.5
+
+  # cLPE (chromatographic Linear Property-Elution) validation parameters
+  # Used for LogK-based outlier detection when reference data is provided
+  clpe:
+    # Z-score threshold for outlier detection
+    # Peaks with |z-score| > threshold are flagged as outliers
+    # 2.5 = ~1.2% false positive rate (two-tailed)
+    outlier_threshold: 2.5
+
+    # Minimum compounds per scaffold group for model fitting
+    # Groups smaller than this are skipped (insufficient data)
+    min_group_size: 5
+
+# =============================================================================
+# Quality Filter Parameters (Pre-filtering)
+# =============================================================================
+quality_filter:
+  # Replicate correlation filter
+  # Positional variants (same block support sequence) are pseudo-replicates
+  # Low correlation indicates quality issues (noise, failed synthesis)
+  # Single-variant classes are always included (can't assess correlation)
+  min_correlation: 0.8
+
+  # Intensity filter
+  # Filters compounds with low total signal (failed synthesis, sample loss)
+  # - percentile: exclude bottom X% (e.g., 0.05 = bottom 5%)
+  # - absolute: explicit minimum threshold (overrides percentile)
+  intensity_percentile: 0.05
+  intensity_absolute: null  # Set to override percentile
+
+  # Noise filter
+  # Ratio of baseline noise to median signal
+  # High noise makes peak detection unreliable
+  # null = disabled (default)
+  max_noise_ratio: null
 
 # =============================================================================
 # Visualization Parameters

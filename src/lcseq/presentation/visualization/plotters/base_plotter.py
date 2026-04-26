@@ -7,6 +7,11 @@ Provides common styling and functionality for all plotters.
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Tuple
+
+# Use Agg backend for thread-safe plotting (required for parallel generation on macOS)
+# Must be set before importing pyplot
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
@@ -55,11 +60,7 @@ class BasePlotter(ABC):
         self.style = style
 
         # Apply matplotlib style
-        try:
-            plt.style.use(self.style)
-        except OSError:
-            # Fall back to default if style not available
-            pass
+        plt.style.use(self.style)
 
     def create_figure(self, figsize: Optional[Tuple[float, float]] = None) -> Tuple[Figure, Axes]:
         """

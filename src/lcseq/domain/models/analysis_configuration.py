@@ -75,9 +75,12 @@ class AnalysisConfiguration:
 
     analysis_mode: AnalysisMode = AnalysisMode.INDIVIDUAL
     hierarchy_mode: HierarchyMode = HierarchyMode.BUILDING_BLOCK
+    preprocessing_params: Dict[str, Any] = field(default_factory=dict)
     peak_detection_params: Dict[str, Any] = field(default_factory=dict)
     validation_params: Dict[str, Any] = field(default_factory=dict)
     classification_params: Dict[str, Any] = field(default_factory=dict)
+    performance_params: Dict[str, Any] = field(default_factory=dict)
+    quality_filter_params: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate and set default parameters."""
@@ -213,9 +216,12 @@ class AnalysisConfiguration:
         return AnalysisConfiguration(
             analysis_mode=self.analysis_mode,
             hierarchy_mode=self.hierarchy_mode,
+            preprocessing_params=self.preprocessing_params.copy(),
             peak_detection_params=self.peak_detection_params.copy(),
             validation_params=self.validation_params.copy(),
             classification_params=self.classification_params.copy(),
+            performance_params=self.performance_params.copy(),
+            quality_filter_params=self.quality_filter_params.copy(),
         )
 
     def __repr__(self) -> str:

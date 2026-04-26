@@ -96,7 +96,11 @@ class CompoundSimilarityAnalyzer:
         -----
         - Wasserstein distance treats signals as probability distributions
         - Euclidean distance requires equal-length signals
-        - Invalid signals return fallback distance of 1.0
+
+        Raises
+        ------
+        ValueError
+            If signals are invalid (zero sum) or numerical issues occur
 
         References
         ----------
@@ -143,7 +147,9 @@ class CompoundSimilarityAnalyzer:
 
         Returns:
             Wasserstein distance in range [0, +inf)
-            Returns 1.0 for invalid signals as a fallback
+
+        Raises:
+            ValueError: If signals are invalid (zero sum)
         """
         # Get signals
         signal1 = compound1.chromatogram.get_signal(signal_variant)
@@ -161,20 +167,15 @@ class CompoundSimilarityAnalyzer:
         sum2 = signal2_normalized.sum()
 
         if sum1 <= 0 or sum2 <= 0:
-            # Invalid signals - return maximum distance
-            return 1.0
+            raise ValueError("Invalid signals: zero sum after normalization")
 
         # Normalize to probability distributions (sum = 1)
         prob1 = signal1_normalized / sum1
         prob2 = signal2_normalized / sum2
 
         # Compute Wasserstein distance
-        try:
-            distance = wasserstein_distance(time1, time2, prob1, prob2)
-            return float(distance)
-        except (ValueError, RuntimeError):
-            # Numerical issues - return fallback
-            return 1.0
+        distance = wasserstein_distance(time1, time2, prob1, prob2)
+        return float(distance)
 
     def _compute_euclidean_distance(
         self,
@@ -206,14 +207,20 @@ class CompoundSimilarityAnalyzer:
                 f"{len(signal1)} vs {len(signal2)}"
             )
 
-        # Normalize signals
+        # Normalize signals to be non-negative
         signal1_norm = np.maximum(signal1 - signal1.min(), 0)
         signal2_norm = np.maximum(signal2 - signal2.min(), 0)
 
-        if signal1_norm.sum() > 0:
-            signal1_norm = signal1_norm / signal1_norm.sum()
-        if signal2_norm.sum() > 0:
-            signal2_norm = signal2_norm / signal2_norm.sum()
+        # Check if signals are valid (non-zero sum)
+        sum1 = signal1_norm.sum()
+        sum2 = signal2_norm.sum()
+
+        if sum1 <= 0 or sum2 <= 0:
+            raise ValueError("Invalid signals: zero sum after normalization")
+
+        # Normalize to probability distributions
+        signal1_norm = signal1_norm / sum1
+        signal2_norm = signal2_norm / sum2
 
         # Compute Euclidean distance
         return float(np.linalg.norm(signal1_norm - signal2_norm))

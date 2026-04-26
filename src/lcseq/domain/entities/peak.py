@@ -20,17 +20,51 @@ class PeakType(Enum):
     NULL : str
         Peak at L₀ (full-null) retention time - DNA tag only
     TRUNCATION : str
-        Peak matching ancestor retention time - incomplete synthesis
+        Peak matching descendant's product retention time - incomplete synthesis
+    TRUNCATION_UNKNOWN : str
+        Peak matching descendant's non-product peak - propagated species
+        (e.g., oligomer, side product that originated from a truncation)
     PUTATIVE_PRODUCT : str
         Peak positionally consistent with expected product elution
         (NOT chemically validated - positional hypothesis only)
     UNKNOWN : str
-        Peak that cannot be classified (late-eluting, unmatched)
+        Peak that cannot be classified (unmatched to any descendant)
     """
     NULL = "NULL"
     TRUNCATION = "TRUNCATION"
+    TRUNCATION_UNKNOWN = "TRUNCATION_UNKNOWN"
     PUTATIVE_PRODUCT = "PUTATIVE_PRODUCT"
     UNKNOWN = "UNKNOWN"
+
+
+class RejectionReason(Enum):
+    """
+    Reason why a peak candidate was rejected during detection.
+
+    Used to track why local maxima were not accepted as peaks,
+    enabling diagnostic visualization of rejected candidates.
+
+    Attributes
+    ----------
+    NONE : str
+        Peak was accepted (not rejected)
+    SIGNIFICANCE : str
+        Rejected due to failing significance test (p-value >= alpha)
+    PROMINENCE : str
+        Rejected due to prominence below threshold
+    BASELINE : str
+        Rejected due to height below baseline threshold
+    SNR : str
+        Rejected due to local SNR below threshold
+    NOT_MAXIMUM : str
+        Rejected because not a verified local maximum
+    """
+    NONE = "none"
+    SIGNIFICANCE = "significance"
+    PROMINENCE = "prominence"
+    BASELINE = "baseline"
+    SNR = "snr"
+    NOT_MAXIMUM = "not_maximum"
 
 
 class ValidationStatus(Enum):
@@ -84,15 +118,27 @@ class Peak:
     area : float
         Integrated peak area
     peak_type : PeakType
-        Classification: NULL, TRUNCATION, PUTATIVE_PRODUCT, or UNKNOWN
+        Classification: NULL, TRUNCATION, TRUNCATION_UNKNOWN, PUTATIVE_PRODUCT, or UNKNOWN
     validation_status : ValidationStatus
         Synthesis validation result (default: NOT_VALIDATED)
+    rejection_reason : RejectionReason
+        Why this peak was rejected during detection (default: NONE = accepted).
+        Rejected peaks are kept for diagnostic visualization.
     left_valley : Optional[float]
         Left valley position (if detected)
     right_valley : Optional[float]
         Right valley position (if detected)
     prominence : Optional[float]
         Chromatographic prominence (height above surrounding valleys)
+    matched_compound_sequence : Optional[str]
+        Block support sequence of the descendant compound whose peak matched this one.
+        Used for tracing peak origin through the hierarchy.
+    matched_peak_position : Optional[float]
+        Retention time of the matched peak in the descendant compound.
+        Together with matched_compound_sequence, enables chain tracing.
+    matched_peak_type : Optional[PeakType]
+        Peak type of the matched descendant peak (TRUNCATION, UNKNOWN, etc.).
+        Indicates whether this peak matched a product or non-product peak.
 
     Notes
     -----
@@ -100,6 +146,7 @@ class Peak:
     - Peak boundaries defined by valley detection or 5% threshold
     - Classification is positional hypothesis (NOT chemical validation)
     - Validation is separate from classification (THEORY.md Section 6.13)
+    - Match tracking fields enable purity breakdown by peak origin
 
     References
     ----------
@@ -116,9 +163,24 @@ class Peak:
     area: float
     peak_type: PeakType = PeakType.UNKNOWN
     validation_status: ValidationStatus = ValidationStatus.NOT_VALIDATED
+    rejection_reason: RejectionReason = RejectionReason.NONE
     left_valley: Optional[float] = None
     right_valley: Optional[float] = None
     prominence: Optional[float] = None
+    # Match tracking - traces peak origin through hierarchy
+    matched_compound_sequence: Optional[str] = None
+    matched_peak_position: Optional[float] = None
+    matched_peak_type: Optional["PeakType"] = None
+    # Significance testing - p-value from detection
+    # Used for filtering product candidates with stricter alpha_product
+    p_value: Optional[float] = None
+
+    # cLPE (chromatographic Linear Peptide Equation) validation fields
+    # See clpe_validator.py for details
+    clpe_residual: Optional[float] = None  # LogK(observed) - LogK(predicted)
+    clpe_z_score: Optional[float] = None  # residual / model_std
+    clpe_is_outlier: Optional[bool] = None  # abs(z_score) > threshold
+    clpe_reselected: bool = False  # True if this peak was selected by cLPE re-selection
 
     def __post_init__(self) -> None:
         """Validate peak properties."""
@@ -188,12 +250,44 @@ class Peak:
         """
         return self.validation_status == ValidationStatus.VALIDATED
 
+    @property
+    def is_rejected(self) -> bool:
+        """
+        Check if this peak was rejected during detection.
+
+        Returns
+        -------
+        bool
+            True if rejection_reason is not NONE
+
+        Notes
+        -----
+        Rejected peaks are local maxima that failed one of the
+        detection filters (significance, prominence, baseline, SNR).
+        They are kept for diagnostic purposes to show why
+        expected peaks might not appear in the final results.
+        """
+        return self.rejection_reason != RejectionReason.NONE
+
+    @property
+    def is_accepted(self) -> bool:
+        """
+        Check if this peak was accepted during detection.
+
+        Returns
+        -------
+        bool
+            True if rejection_reason is NONE
+        """
+        return self.rejection_reason == RejectionReason.NONE
+
     def __repr__(self) -> str:
         """Detailed representation for debugging."""
+        rejection_str = f", rejected={self.rejection_reason.value}" if self.is_rejected else ""
         return (
             f"Peak(position={self.position:.2f}, "
             f"height={self.height:.1f}, "
             f"area={self.area:.1f}, "
             f"type={self.peak_type.value}, "
-            f"validation={self.validation_status.value})"
+            f"validation={self.validation_status.value}{rejection_str})"
         )

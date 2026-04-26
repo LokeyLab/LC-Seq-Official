@@ -9,22 +9,55 @@ These workflows orchestrate multiple domain services to accomplish complete
 processing tasks.
 """
 
-from typing import List, Dict, Optional
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import List, Dict, Optional, Any, TYPE_CHECKING, Tuple
+from tqdm import tqdm
 from lcseq.domain.entities import Compound, Peak
 from lcseq.domain.models import CompoundHierarchy
 from lcseq.domain.services import (
     PeakDetector,
     PeakClassifier,
     PeakIntegrator,
+    SignalPreprocessor,
+    PreprocessingConfig,
 )
-from lcseq.config import (
-    DEFAULT_Z_THRESHOLD,
-    DEFAULT_PROMINENCE_PERCENTILE,
-    DEFAULT_MIN_SNR,
-    DEFAULT_MIN_BASELINE_SDS,
-    DEFAULT_SIGNAL_VARIANT,
-    DEFAULT_TRUNCATION_MARGIN,
-)
+
+
+def _detect_peaks_for_compound(
+    compound_data: Tuple[int, Any, Any],  # (index, chromatogram, detection_params)
+) -> Tuple[int, List[Peak]]:
+    """
+    Worker function for parallel peak detection.
+
+    Must be top-level function for pickling in multiprocessing.
+
+    Parameters
+    ----------
+    compound_data : tuple
+        (compound_index, chromatogram, detection_params_dict)
+
+    Returns
+    -------
+    tuple
+        (compound_index, detected_peaks)
+    """
+    idx, chromatogram, params = compound_data
+    detector = PeakDetector(sigma_clip_sigma=params["sigma_clip_sigma"])
+    peaks = detector.detect_peaks(
+        chromatogram,
+        alpha=params["alpha"],
+        prominence_percentile=params["prominence_percentile"],
+        min_snr=params["min_snr"],
+        min_baseline_sds=params["min_baseline_sds"],
+        signal_variant=params["signal_variant"],
+        min_dispersion_r=params["min_dispersion_r"],
+        include_rejected=params["include_rejected"],
+    )
+    return idx, peaks
+
+if TYPE_CHECKING:
+    from lcseq.domain.services.clpe_validator import CLPEValidator
 class ProcessChromatogramsUseCase:
     """Use case for processing chromatograms with detection and classification.
 
@@ -39,48 +72,89 @@ class ProcessChromatogramsUseCase:
         self,
         detector: Optional[PeakDetector] = None,
         classifier: Optional[PeakClassifier] = None,
+        sigma_clip_sigma: float = 2.0,
     ):
         """Initialize with domain services (dependency injection).
 
         Args:
-            detector: Peak detection service (optional)
-            classifier: Peak classification service (optional)
+            detector: Peak detection service (optional, created if not provided)
+            classifier: Peak classification service (optional, created if not provided)
+            sigma_clip_sigma: Sigma for baseline estimation (default 2.0 = 95% CI)
         """
-        self.detector = detector or PeakDetector()
+        self._sigma_clip_sigma = sigma_clip_sigma
+        self.detector = detector or PeakDetector(sigma_clip_sigma=sigma_clip_sigma)
         self.classifier = classifier or PeakClassifier()
 
     def execute(
         self,
         compounds: List[Compound],
         hierarchy: CompoundHierarchy,
-        z_threshold: float = DEFAULT_Z_THRESHOLD,
-        prominence_percentile: float = DEFAULT_PROMINENCE_PERCENTILE,
-        min_snr: float = DEFAULT_MIN_SNR,
-        min_baseline_sds: float = DEFAULT_MIN_BASELINE_SDS,
-        signal_variant: str = DEFAULT_SIGNAL_VARIANT,
-        truncation_margin: float = DEFAULT_TRUNCATION_MARGIN,
-    ) -> Dict[Compound, List[Peak]]:
+        # Peak detection parameters
+        alpha: float,
+        prominence_percentile: float,
+        min_snr: float,
+        min_baseline_sds: float,
+        signal_variant: str,
+        min_dispersion_r: float,
+        sigma_clip_sigma: float,
+        # Peak classification parameters
+        alpha_product: float,
+        truncation_margin: float,
+        peak_matching_tolerance: float,
+        hungarian_min_threshold: float,
+        # Validation parameters
+        include_rejected: bool,
+        # Preprocessing parameters
+        preprocessing_params: Dict[str, Any],
+        # Performance parameters
+        num_workers: Optional[int] = None,
+        # Optional cLPE validator (dependency injection)
+        clpe_validator: Optional["CLPEValidator"] = None,
+        alogp_map: Optional[Dict[str, float]] = None,
+        scaffold_map: Optional[Dict[str, str]] = None,
+    ) -> Tuple[Dict[Compound, List[Peak]], Optional[Dict[str, Any]]]:
         """Process all chromatograms: detect and classify peaks.
 
         Args:
             compounds: List of compounds to process
             hierarchy: Compound hierarchy for peak classification
-            z_threshold: Poisson Z-score threshold
+            alpha: Significance level for general peak acceptance (permissive)
+            alpha_product: Significance level for product selection (strict)
             prominence_percentile: Prominence percentile threshold
             min_snr: Adaptive SNR threshold multiplier
             min_baseline_sds: Global baseline threshold in SDs
             signal_variant: Signal variant to use for detection
             truncation_margin: Margin beyond truncation positions (in seconds)
+            peak_matching_tolerance: Relative tolerance for peak matching
+            clpe_validator: Optional cLPE validator for peak validation
+            alogp_map: Optional mapping from compound ID to AlogP
+            scaffold_map: Optional mapping from compound ID to scaffold
+            num_workers: Number of parallel workers for peak detection.
+                None or 1 = sequential processing (default).
+                >1 = parallel processing with specified workers.
+                -1 = use all available CPU cores.
 
         Returns:
-            Dictionary mapping compounds to their detected peaks
+            Tuple of:
+            - Dictionary mapping compounds to their detected peaks
+            - cLPE statistics (if validation enabled), None otherwise
 
         Notes
         -----
-        Processes compounds in topological order (bottom-up, L₀ first) per
-        THEORY.md Section 5.4 to ensure descendants are processed before ancestors.
-        This allows peak classification to use descendant product positions as
-        truncation constraints.
+        Processing is done in two phases:
+        1. Peak detection: Detect peaks for all compounds (parallelizable)
+        2. Classification: Classify peaks hierarchically (bottom-up) with
+           descendant matching to propagate peak origins up the hierarchy
+
+        If cLPE validation is enabled, it runs at each level during
+        classification to validate and potentially re-select peaks.
+
+        This two-phase approach ensures all descendant peaks are detected
+        before classification, enabling TRUNCATION_UNKNOWN matching where
+        peaks are matched to any descendant peak (not just products).
+
+        Parallel processing (num_workers > 1) provides 4-8x speedup on
+        multi-core systems for large datasets (1000+ compounds).
 
         References
         ----------
@@ -90,37 +164,99 @@ class ProcessChromatogramsUseCase:
         """
         peaks_dict = {}
 
-        # Process in topological order: L₀ first, then ancestors (THEORY.md 5.4)
-        # This ensures descendants are processed before ancestors
-        sorted_compounds = hierarchy.topological_sort()
+        # Phase 0: Apply preprocessing if enabled
+        preprocessing_config = PreprocessingConfig.from_dict(preprocessing_params)
+        if preprocessing_config.enabled:
+            preprocessor = SignalPreprocessor(preprocessing_config)
+            for compound in compounds:
+                if compound.chromatogram is not None:
+                    if not compound.chromatogram.has_signal_variant("corrected"):
+                        preprocessor.preprocess(compound.chromatogram)
 
-        # Filter to only include compounds in the input list
-        compounds_set = set(compounds)
-        sorted_compounds = [c for c in sorted_compounds if c in compounds_set]
+        # Phase 1: Detect peaks for all compounds
+        show_progress = len(compounds) > 100
 
-        for compound in sorted_compounds:
-            # Step 1: Peak detection with Poisson statistics
-            peaks = self.detector.detect_peaks(
-                compound.chromatogram,
-                z_threshold=z_threshold,
-                prominence_percentile=prominence_percentile,
-                min_snr=min_snr,
-                min_baseline_sds=min_baseline_sds,
-                signal_variant=signal_variant,
+        # Determine number of workers
+        if num_workers == -1:
+            num_workers = os.cpu_count() or 1
+        use_parallel = num_workers is not None and num_workers > 1
+
+        if use_parallel and len(compounds) > num_workers:
+            # Parallel peak detection
+            detection_params = {
+                "alpha": alpha,
+                "prominence_percentile": prominence_percentile,
+                "min_snr": min_snr,
+                "min_baseline_sds": min_baseline_sds,
+                "signal_variant": signal_variant,
+                "min_dispersion_r": min_dispersion_r,
+                "sigma_clip_sigma": sigma_clip_sigma,
+                "include_rejected": include_rejected,
+            }
+
+            # Prepare work items: (index, chromatogram, params)
+            work_items = [
+                (i, compound.chromatogram, detection_params)
+                for i, compound in enumerate(compounds)
+            ]
+
+            # Process in parallel with progress bar
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = {
+                    executor.submit(_detect_peaks_for_compound, item): item[0]
+                    for item in work_items
+                }
+
+                with tqdm(
+                    total=len(compounds),
+                    desc=f"Detecting peaks ({num_workers} workers)",
+                    disable=not show_progress,
+                    unit="cpd"
+                ) as pbar:
+                    for future in as_completed(futures):
+                        idx, peaks = future.result()
+                        compounds[idx].detected_peaks = peaks
+                        pbar.update(1)
+        else:
+            # Sequential peak detection (default)
+            compounds_iter = tqdm(
+                compounds,
+                desc="Detecting peaks",
+                disable=not show_progress,
+                unit="cpd"
             )
+            for compound in compounds_iter:
+                peaks = self.detector.detect_peaks(
+                    compound.chromatogram,
+                    alpha=alpha,
+                    prominence_percentile=prominence_percentile,
+                    min_snr=min_snr,
+                    min_baseline_sds=min_baseline_sds,
+                    signal_variant=signal_variant,
+                    min_dispersion_r=min_dispersion_r,
+                    include_rejected=include_rejected,
+                )
+                compound.detected_peaks = peaks
 
-            # Step 2: Peak classification
-            compound.detected_peaks = peaks
-            self.classifier.classify_all_peaks(
-                compound,
-                hierarchy,
-                truncation_margin=truncation_margin,
-            )
+        # Phase 2: Classify peaks hierarchically with descendant matching
+        # This processes bottom-up (L0 -> L1 -> ...) to enable match propagation
+        # If cLPE is enabled, validation happens at each level
+        clpe_stats = self.classifier.classify_hierarchy(
+            hierarchy,
+            tolerance=peak_matching_tolerance,
+            truncation_margin=truncation_margin,
+            alpha_product=alpha_product,
+            hungarian_min_threshold=hungarian_min_threshold,
+            clpe_validator=clpe_validator,
+            alogp_map=alogp_map,
+            scaffold_map=scaffold_map,
+        )
 
-            # Step 3: Store results
+        # Collect results
+        for compound in compounds:
             peaks_dict[compound] = compound.detected_peaks
 
-        return peaks_dict
+        return peaks_dict, clpe_stats
 
 
 class ProcessChromatogramsWithIntegrationUseCase:
@@ -138,30 +274,34 @@ class ProcessChromatogramsWithIntegrationUseCase:
         self,
         detector: Optional[PeakDetector] = None,
         integrator: Optional[PeakIntegrator] = None,
+        sigma_clip_sigma: float = 2.0,
     ):
         """Initialize with domain services (dependency injection).
 
         Args:
             detector: Peak detection service (optional)
             integrator: Peak integration service (optional)
+            sigma_clip_sigma: Sigma for baseline estimation (default 2.0 = 95% CI)
         """
-        self.detector = detector or PeakDetector()
+        self.detector = detector or PeakDetector(sigma_clip_sigma=sigma_clip_sigma)
         self.integrator = integrator or PeakIntegrator()
 
     def execute(
         self,
         compounds: List[Compound],
-        z_threshold: float = DEFAULT_Z_THRESHOLD,
-        prominence_percentile: float = DEFAULT_PROMINENCE_PERCENTILE,
-        min_snr: float = DEFAULT_MIN_SNR,
-        min_baseline_sds: float = DEFAULT_MIN_BASELINE_SDS,
-        signal_variant: str = DEFAULT_SIGNAL_VARIANT,
+        alpha: float,
+        prominence_percentile: float,
+        min_snr: float,
+        min_baseline_sds: float,
+        signal_variant: str,
+        min_dispersion_r: float,
+        include_rejected: bool,
     ) -> List[Dict]:
         """Process all chromatograms: detect and integrate peaks.
 
         Args:
             compounds: List of compounds to process
-            z_threshold: Poisson Z-score threshold
+            alpha: Significance level (false positive rate)
             prominence_percentile: Prominence percentile threshold
             min_snr: Adaptive SNR threshold multiplier
             min_baseline_sds: Global baseline threshold in SDs
@@ -183,11 +323,13 @@ class ProcessChromatogramsWithIntegrationUseCase:
             # Step 1: Peak detection with Poisson statistics
             peaks = self.detector.detect_peaks(
                 compound.chromatogram,
-                z_threshold=z_threshold,
+                alpha=alpha,
                 prominence_percentile=prominence_percentile,
                 min_snr=min_snr,
                 min_baseline_sds=min_baseline_sds,
                 signal_variant=signal_variant,
+                min_dispersion_r=min_dispersion_r,
+                include_rejected=include_rejected,
             )
 
             # Step 2: Peak integration

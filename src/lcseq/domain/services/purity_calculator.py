@@ -7,6 +7,7 @@ all validation services (BayesianValidator, AdaptiveValidator, etc.).
 Implementation based on THEORY.md Section 6.3.
 """
 
+from typing import List, Dict, Any
 import numpy as np
 from ..entities.compound import Compound
 from ..entities.peak import PeakType
@@ -26,7 +27,11 @@ class PurityCalculator:
     -----
     Purity = Area(PUTATIVE_PRODUCT) / [Area(PUTATIVE_PRODUCT) + Area(all others)]
 
-    All non-product peaks count as impurities:
+    Only ACCEPTED peaks (peaks that passed detection thresholds) are included.
+    Rejected peaks (failed significance, prominence, baseline, or SNR filters)
+    are excluded from purity calculation.
+
+    All non-product ACCEPTED peaks count as impurities:
     - TRUNCATION peaks (incomplete synthesis)
     - NULL peaks (unknown origin)
     - UNKNOWN peaks (unclassified)
@@ -98,9 +103,78 @@ class PurityCalculator:
         total_area = 0.0
 
         for peak in compound.detected_peaks:
+            # Only include accepted peaks in purity calculation
+            if not peak.is_accepted:
+                continue
             total_area += peak.area
             if peak.peak_type == PeakType.PUTATIVE_PRODUCT:
                 product_area += peak.area
+
+        if total_area == 0:
+            return 0.0
+
+        purity = product_area / total_area
+        return float(np.clip(purity, 0.0, 1.0))
+
+    @staticmethod
+    def calculate_from_peaks(peaks: List[Dict[str, Any]]) -> float:
+        """
+        Calculate purity from serialized peak data (JSONL records).
+
+        This method enables purity calculation from peak dictionaries
+        without requiring full Compound objects, useful for analysis
+        scripts that read JSONL files directly.
+
+        Parameters
+        ----------
+        peaks : List[Dict]
+            Peak dictionaries with 'area', 'classification', and optionally 'is_accepted'
+
+        Returns
+        -------
+        float
+            Purity value in [0, 1]
+
+        Notes
+        -----
+        Peak dictionaries must contain:
+        - 'area': float (peak area)
+        - 'classification': str (e.g., "PUTATIVE_PRODUCT", "TRUNCATION", "NULL")
+        - 'is_accepted': bool (required)
+
+        Only accepted peaks with area > 0 are included in the calculation.
+
+        Edge cases:
+        - Empty peaks list → purity = 0.0
+        - No accepted peaks → purity = 0.0
+        - Total area = 0 → purity = 0.0
+
+        Examples
+        --------
+        >>> peaks = [
+        ...     {"area": 100, "classification": "PUTATIVE_PRODUCT", "is_accepted": True},
+        ...     {"area": 15, "classification": "TRUNCATION", "is_accepted": True},
+        ...     {"area": 5, "classification": "NULL", "is_accepted": True}
+        ... ]
+        >>> PurityCalculator.calculate_from_peaks(peaks)
+        0.833  # 100 / (100 + 15 + 5)
+        """
+        if not peaks:
+            return 0.0
+
+        total_area = 0.0
+        product_area = 0.0
+
+        for p in peaks:
+            area = p.get("area", 0)
+            if area <= 0:
+                continue
+            is_accepted = p["is_accepted"]  # Required field
+            if not is_accepted:
+                continue
+            total_area += area
+            if p.get("classification") == "PUTATIVE_PRODUCT":
+                product_area += area
 
         if total_area == 0:
             return 0.0

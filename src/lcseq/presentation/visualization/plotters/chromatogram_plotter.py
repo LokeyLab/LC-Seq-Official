@@ -16,6 +16,7 @@ from matplotlib.axes import Axes
 from .base_plotter import BasePlotter
 from ....domain.entities.chromatogram import Chromatogram
 from ....domain.entities.peak import Peak, PeakType
+from ....config import PeakAppearanceConfig
 
 
 class ChromatogramPlotter(BasePlotter):
@@ -29,19 +30,10 @@ class ChromatogramPlotter(BasePlotter):
     - Peak classifications (NULL, TRUNCATION, PUTATIVE_PRODUCT, UNKNOWN)
     """
 
-    # Color scheme for peak types
-    PEAK_COLORS = {
-        PeakType.NULL: "gray",
-        PeakType.TRUNCATION: "orange",
-        PeakType.PUTATIVE_PRODUCT: "green",
-        PeakType.UNKNOWN: "red",
-    }
-
     def plot(
         self,
         chromatogram: Chromatogram,
         peaks: Optional[List[Peak]] = None,
-        signal_variant: str = "raw",
         title: Optional[str] = None,
     ) -> Figure:
         """
@@ -53,8 +45,6 @@ class ChromatogramPlotter(BasePlotter):
             Chromatogram to plot
         peaks : List[Peak], optional
             Detected peaks to overlay
-        signal_variant : str, optional
-            Signal variant to plot (default: "raw")
         title : str, optional
             Plot title
 
@@ -65,12 +55,12 @@ class ChromatogramPlotter(BasePlotter):
         """
         fig, ax = self.create_figure()
 
-        # Get signal to plot
-        signal = chromatogram.get_signal(signal_variant)
+        # Get baseline-corrected signal
+        signal = chromatogram.get_signal("corrected")
         time = chromatogram.time_points
 
         # Plot main signal
-        ax.plot(time, signal, "b-", linewidth=1.5, label=f"{signal_variant.capitalize()} signal")
+        ax.plot(time, signal, "b-", linewidth=1.5, label="Signal")
 
         # Plot peaks
         if peaks:
@@ -100,7 +90,7 @@ class ChromatogramPlotter(BasePlotter):
             height = signal[idx]
 
             # Get color for peak type
-            color = self.PEAK_COLORS.get(peak.peak_type, "gray")
+            color = PeakAppearanceConfig.get_color(peak.peak_type)
 
             # Add label only for first peak of each type
             label = None

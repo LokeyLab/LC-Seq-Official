@@ -211,11 +211,14 @@ class JSONExporter:
         for compound in lineage:
             peaks = peaks_dict.get(compound, [])
 
-            # Count peaks by type
-            product_peaks = sum(1 for p in peaks if p.is_product_peak)
-            truncation_peaks = sum(1 for p in peaks if p.peak_type.value == "TRUNCATION")
-            null_peaks = sum(1 for p in peaks if p.peak_type.value == "NULL")
-            unknown_peaks = sum(1 for p in peaks if p.peak_type.value == "UNKNOWN")
+            # Count peaks by type (only accepted peaks for main counts)
+            accepted_peaks = [p for p in peaks if p.is_accepted]
+            rejected_peaks = [p for p in peaks if p.is_rejected]
+            product_peaks = sum(1 for p in accepted_peaks if p.is_product_peak)
+            truncation_peaks = sum(1 for p in accepted_peaks if p.peak_type.value == "TRUNCATION")
+            truncation_unknown_peaks = sum(1 for p in accepted_peaks if p.peak_type.value == "TRUNCATION_UNKNOWN")
+            null_peaks = sum(1 for p in accepted_peaks if p.peak_type.value == "NULL")
+            unknown_peaks = sum(1 for p in accepted_peaks if p.peak_type.value == "UNKNOWN")
 
             # Get descendants and ancestors
             descendants = hierarchy.get_descendants(compound)
@@ -228,14 +231,24 @@ class JSONExporter:
                 "peaks": [self._peak_to_dict(p) for p in peaks],
                 "statistics": {
                     "total_peaks": len(peaks),
+                    "accepted_peaks": len(accepted_peaks),
+                    "rejected_peaks": len(rejected_peaks),
                     "product_peaks": product_peaks,
                     "truncation_peaks": truncation_peaks,
+                    "truncation_unknown_peaks": truncation_unknown_peaks,
                     "null_peaks": null_peaks,
                     "unknown_peaks": unknown_peaks
                 },
                 "descendants": [d.positional_block_sequence for d in descendants],
                 "ancestors": [a.positional_block_sequence for a in ancestors]
             }
+
+            # Add cLPE reference data if present (AlogP and scaffold only)
+            if compound.alogp is not None:
+                compound_data["clpe_data"] = {
+                    "alogp": round(compound.alogp, 4),
+                    "scaffold_group": compound.scaffold_group
+                }
 
             compounds_data.append(compound_data)
 
@@ -248,17 +261,41 @@ class JSONExporter:
 
     def _peak_to_dict(self, peak: Peak) -> Dict[str, Any]:
         """Convert Peak entity to dictionary."""
-        return {
+        result = {
             "retention_time": round(peak.position, 4),
             "area": round(peak.area, 2),
             "height": round(peak.height, 2),
             "classification": peak.peak_type.value,
             "validation_status": peak.validation_status.value,
+            "is_accepted": peak.is_accepted,
+            "rejection_reason": peak.rejection_reason.value if peak.is_rejected else None,
+            "p_value": round(peak.p_value, 6) if peak.p_value is not None else None,
             "left_base": round(peak.left_base, 4),
             "right_base": round(peak.right_base, 4),
             "width": round(peak.width, 4),
-            "prominence": round(peak.prominence, 2) if peak.prominence else None
+            "prominence": round(peak.prominence, 2) if peak.prominence else None,
+            # Match tracking fields - trace peak origin through hierarchy
+            "matched_compound_sequence": peak.matched_compound_sequence,
+            "matched_peak_position": (
+                round(peak.matched_peak_position, 4)
+                if peak.matched_peak_position is not None else None
+            ),
+            "matched_peak_type": (
+                peak.matched_peak_type.value
+                if peak.matched_peak_type is not None else None
+            ),
         }
+
+        # Add cLPE validation fields if present
+        if peak.clpe_residual is not None:
+            result["clpe_validation"] = {
+                "residual": round(peak.clpe_residual, 4),
+                "z_score": round(peak.clpe_z_score, 2) if peak.clpe_z_score is not None else None,
+                "is_outlier": peak.clpe_is_outlier,
+                "reselected": peak.clpe_reselected
+            }
+
+        return result
 
     def _build_equivalence_classes_data(
         self,
@@ -309,14 +346,26 @@ class JSONExporter:
         for peaks in peaks_dict.values():
             all_peaks.extend(peaks)
 
+        # Separate accepted vs rejected peaks
+        accepted_peaks = [p for p in all_peaks if p.is_accepted]
+        rejected_peaks = [p for p in all_peaks if p.is_rejected]
+
         total_peaks = len(all_peaks)
         compounds_with_peaks = sum(1 for peaks in peaks_dict.values() if len(peaks) > 0)
+        compounds_with_accepted = sum(
+            1 for peaks in peaks_dict.values()
+            if any(p.is_accepted for p in peaks)
+        )
         compounds_without_peaks = len(lineage) - compounds_with_peaks
 
         stats = {
             "total_peaks": total_peaks,
+            "accepted_peaks": len(accepted_peaks),
+            "rejected_peaks": len(rejected_peaks),
             "peaks_per_compound_avg": round(total_peaks / len(lineage), 2) if lineage else 0,
+            "accepted_peaks_per_compound_avg": round(len(accepted_peaks) / len(lineage), 2) if lineage else 0,
             "compounds_with_peaks": compounds_with_peaks,
+            "compounds_with_accepted_peaks": compounds_with_accepted,
             "compounds_without_peaks": compounds_without_peaks
         }
 

@@ -2,11 +2,17 @@
 CompoundHierarchy - DAG/Poset structure for truncation relationships.
 
 Implementation based on THEORY.md Section 3.3, 4.2.2, 4.2.3.
+
+Uses rustworkx for high-performance graph operations:
+- O(1) node/edge lookup
+- O(V+E) topological sort
+- Efficient ancestor/descendant queries
 """
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Set, Optional
 from enum import Enum
+import rustworkx as rx
 from ..entities.compound import Compound
 
 
@@ -30,7 +36,6 @@ class HierarchyMode(Enum):
     MONOMER = "monomer"
 
 
-@dataclass
 class CompoundHierarchy:
     """
     Directed Acyclic Graph (DAG) representing truncation relationships.
@@ -40,14 +45,15 @@ class CompoundHierarchy:
     - Building-block mode: Convergence at block granularity (THEORY.md 4.2.2)
     - Monomer mode: Convergence at monomer granularity (THEORY.md 4.2.3)
 
+    Uses rustworkx for high-performance graph operations:
+    - O(1) node/edge lookup via hash maps
+    - O(V+E) topological sort
+    - Efficient ancestor/descendant queries
+
     Attributes
     ----------
     mode : HierarchyMode
         Building-block or monomer mode
-    compounds : List[Compound]
-        All compounds in the hierarchy (all positional variants, no deduplication)
-    edges : Dict[Compound, Set[Compound]]
-        Direct descendant relationships: ancestor → {descendants}
 
     Notes
     -----
@@ -58,38 +64,6 @@ class CompoundHierarchy:
     - Store only direct descendants (transitive reduction)
     - Ancestors computed via reverse traversal
 
-    Examples
-    --------
-    >>> from lcseq.domain.entities.building_block import BuildingBlock
-    >>> from lcseq.domain.entities.chromatogram import Chromatogram
-    >>> import numpy as np
-    >>>
-    >>> # Create simple hierarchy
-    >>> hierarchy = CompoundHierarchy(mode=HierarchyMode.BUILDING_BLOCK)
-    >>>
-    >>> # Create compounds
-    >>> chromatogram = Chromatogram(
-    ...     time_points=np.array([1.0, 2.0, 3.0]),
-    ...     counts=np.array([100.0, 200.0, 150.0])
-    ... )
-    >>> bb0 = BuildingBlock.from_code(0, "Pro")
-    >>> bb1 = BuildingBlock.from_code(1, "Leu")
-    >>> bb2 = BuildingBlock.from_code(2, "Val")
-    >>> bb_null = BuildingBlock.from_code(0, "Null")
-    >>>
-    >>> # Maximal compound
-    >>> maximal = Compound([bb0, bb1, bb2], chromatogram)
-    >>> hierarchy.add_compound(maximal)
-    >>>
-    >>> # Add truncation
-    >>> truncation = Compound([bb_null, bb1, bb2], chromatogram)
-    >>> hierarchy.add_compound(truncation)
-    >>> hierarchy.add_edge(maximal, truncation)
-    >>>
-    >>> # Query hierarchy
-    >>> hierarchy.get_descendants(maximal)
-    [truncation]
-
     References
     ----------
     THEORY.md Section 1.1: Core Mathematical Model (DAG/Poset)
@@ -98,9 +72,25 @@ class CompoundHierarchy:
     THEORY.md Section 4.2.3: Monomer Mode (Convergence at Monomer Granularity)
     """
 
-    mode: HierarchyMode
-    compounds: List[Compound] = field(default_factory=list)
-    edges: Dict[Compound, Set[Compound]] = field(default_factory=dict)
+    def __init__(self, mode: HierarchyMode = HierarchyMode.BUILDING_BLOCK):
+        """
+        Initialize hierarchy with specified mode.
+
+        Parameters
+        ----------
+        mode : HierarchyMode
+            Building-block or monomer mode (default: BUILDING_BLOCK)
+        """
+        self.mode = mode
+        self._graph = rx.PyDiGraph()
+        self._compound_to_idx: Dict[Compound, int] = {}
+        self._idx_to_compound: Dict[int, Compound] = {}
+        self._level_index: Dict[int, List[Compound]] = {}  # Cache for O(1) level lookups
+
+    @property
+    def compounds(self) -> List[Compound]:
+        """Get all compounds in hierarchy."""
+        return list(self._compound_to_idx.keys())
 
     def add_compound(self, compound: Compound) -> None:
         """
@@ -114,11 +104,19 @@ class CompoundHierarchy:
         Notes
         -----
         - Idempotent: adding same compound multiple times is safe
+        - O(1) operation
+        - Updates level index cache for O(1) level lookups
         """
-        if compound not in self.compounds:
-            self.compounds.append(compound)
-        if compound not in self.edges:
-            self.edges[compound] = set()
+        if compound not in self._compound_to_idx:
+            idx = self._graph.add_node(compound)
+            self._compound_to_idx[compound] = idx
+            self._idx_to_compound[idx] = compound
+
+            # Update level index cache
+            level = compound.monomer_level if self.mode == HierarchyMode.MONOMER else compound.level
+            if level not in self._level_index:
+                self._level_index[level] = []
+            self._level_index[level].append(compound)
 
     def add_edge(self, ancestor: Compound, descendant: Compound) -> None:
         """
@@ -127,26 +125,21 @@ class CompoundHierarchy:
         Parameters
         ----------
         ancestor : Compound
-            Ancestor compound (longer sequence) - THEORY.md Section 3.1:
-            "Compound with more building blocks"
+            Ancestor compound (longer sequence)
         descendant : Compound
-            Descendant compound (shorter sequence) - THEORY.md Section 3.1:
-            "Compound with fewer building blocks"
+            Descendant compound (shorter sequence)
 
         Raises
         ------
         ValueError
             If ancestor or descendant not in hierarchy
         ValueError
-            If edge would create cycle
-        ValueError
             If descendant has higher level than ancestor
 
         Notes
         -----
-        - Validates acyclic property (no cycles)
         - Validates level ordering (descendant.level < ancestor.level)
-        - Only stores direct edges (transitive reduction)
+        - O(1) operation (cycle check skipped for performance - validated by level ordering)
 
         References
         ----------
@@ -155,17 +148,13 @@ class CompoundHierarchy:
         THEORY.md Section 3.3: Level ordering
         """
         # Validate both compounds in hierarchy
-        if ancestor not in self.compounds:
+        if ancestor not in self._compound_to_idx:
             raise ValueError(f"Ancestor compound not in hierarchy: {ancestor}")
-        if descendant not in self.compounds:
+        if descendant not in self._compound_to_idx:
             raise ValueError(f"Descendant compound not in hierarchy: {descendant}")
 
-        # Validate level ordering
-        if self.mode == HierarchyMode.BUILDING_BLOCK:
-            level_attr = "level"
-        else:  # MONOMER
-            level_attr = "monomer_level"
-
+        # Validate level ordering (this guarantees no cycles)
+        level_attr = "monomer_level" if self.mode == HierarchyMode.MONOMER else "level"
         ancestor_level = getattr(ancestor, level_attr)
         descendant_level = getattr(descendant, level_attr)
 
@@ -174,58 +163,10 @@ class CompoundHierarchy:
                 f"Descendant level ({descendant_level}) must be < ancestor level ({ancestor_level})"
             )
 
-        # Check for cycles (would descendant → ancestor path exist?)
-        if self._creates_cycle(ancestor, descendant):
-            raise ValueError(
-                f"Adding edge {ancestor} → {descendant} would create cycle"
-            )
-
-        # Add edge (initialize ancestor's descendants set if needed)
-        if ancestor not in self.edges:
-            self.edges[ancestor] = set()
-        self.edges[ancestor].add(descendant)
-
-    def _creates_cycle(self, ancestor: Compound, descendant: Compound) -> bool:
-        """
-        Check if adding ancestor → descendant edge would create cycle.
-
-        Returns True if there exists path from descendant back to ancestor.
-        """
-        # If descendant can reach ancestor, then ancestor → descendant creates cycle
-        return ancestor in self._get_all_descendants(descendant)
-
-    def _get_all_descendants(self, compound: Compound) -> List[Compound]:
-        """
-        Get all descendants (transitive closure) via DFS.
-
-        Parameters
-        ----------
-        compound : Compound
-            Starting compound
-
-        Returns
-        -------
-        List[Compound]
-            All reachable descendants (not including compound itself)
-        """
-        descendants = []
-        stack = [compound]
-        visited = []
-
-        while stack:
-            current = stack.pop()
-            if current in visited:
-                continue
-            visited.append(current)
-
-            # Find descendants of current
-            if current in self.edges:
-                for descendant in self.edges[current]:
-                    if descendant not in descendants:
-                        descendants.append(descendant)
-                    stack.append(descendant)
-
-        return descendants
+        # Add edge
+        ancestor_idx = self._compound_to_idx[ancestor]
+        descendant_idx = self._compound_to_idx[descendant]
+        self._graph.add_edge(ancestor_idx, descendant_idx, None)
 
     def get_descendants(self, compound: Compound) -> List[Compound]:
         """
@@ -244,19 +185,19 @@ class CompoundHierarchy:
         Notes
         -----
         Computes principal ideal ↓X in poset terminology (THEORY.md 3.2).
-
-        Uses graph traversal on edges built by HierarchyBuilder.
-        In building block mode, positional variants with same block support
-        will have same descendants because edges are built using block support logic.
+        Uses rustworkx's efficient BFS/DFS traversal.
 
         References
         ----------
         THEORY.md Section 3.2: Principal Ideal ↓X
         """
-        if compound not in self.compounds:
+        if compound not in self._compound_to_idx:
             return []
 
-        return self._get_all_descendants(compound)
+        idx = self._compound_to_idx[compound]
+        # rx.descendants returns set of node indices reachable from idx
+        descendant_indices = rx.descendants(self._graph, idx)
+        return [self._idx_to_compound[i] for i in descendant_indices]
 
     def get_ancestors(self, compound: Compound) -> List[Compound]:
         """
@@ -275,33 +216,19 @@ class CompoundHierarchy:
         Notes
         -----
         Computes principal filter ↑X in poset terminology (THEORY.md 3.2).
+        Uses rustworkx's efficient reverse traversal.
 
         References
         ----------
         THEORY.md Section 3.2: Principal Filter ↑X
         """
-        if compound not in self.compounds:
+        if compound not in self._compound_to_idx:
             return []
 
-        # DFS using reverse traversal of edges
-        ancestors = []
-        stack = [compound]
-        visited = []
-
-        while stack:
-            current = stack.pop()
-            if current in visited:
-                continue
-            visited.append(current)
-
-            # Find ancestors of current (scan all edges)
-            for ancestor, descendants_set in self.edges.items():
-                if current in descendants_set:
-                    if ancestor not in ancestors:
-                        ancestors.append(ancestor)
-                    stack.append(ancestor)
-
-        return ancestors
+        idx = self._compound_to_idx[compound]
+        # rx.ancestors returns set of node indices that can reach idx
+        ancestor_indices = rx.ancestors(self._graph, idx)
+        return [self._idx_to_compound[i] for i in ancestor_indices]
 
     def get_maximal_compounds(self) -> List[Compound]:
         """
@@ -310,24 +237,22 @@ class CompoundHierarchy:
         Returns
         -------
         List[Compound]
-            Compounds with no ancestors
+            Compounds with no ancestors (in-degree 0)
 
         Notes
         -----
         Typically the reference compound(s) at the root of the lineage.
-        In both modes: longest sequences in the analysis set.
 
         References
         ----------
         THEORY.md Section 3.2: Maximal Element
         """
-        # Build set of all compounds that have ancestors
-        has_ancestor = set()
-        for ancestor, descendants_set in self.edges.items():
-            has_ancestor.update(descendants_set)
-
-        # Maximal = in hierarchy but not in has_ancestor
-        return [c for c in self.compounds if c not in has_ancestor]
+        # Maximal = nodes with in-degree 0 (no incoming edges = no ancestors)
+        return [
+            self._idx_to_compound[idx]
+            for idx in self._graph.node_indices()
+            if self._graph.in_degree(idx) == 0
+        ]
 
     def get_minimal_compounds(self) -> List[Compound]:
         """
@@ -336,7 +261,7 @@ class CompoundHierarchy:
         Returns
         -------
         List[Compound]
-            Compounds with no descendants
+            Compounds with no descendants (out-degree 0)
 
         Notes
         -----
@@ -346,9 +271,12 @@ class CompoundHierarchy:
         ----------
         THEORY.md Section 3.2: Minimal Element
         """
-        # Minimal = compounds with no descendants
-        has_descendants = set(ancestor for ancestor, descendants_set in self.edges.items() if descendants_set)
-        return [c for c in self.compounds if c not in has_descendants]
+        # Minimal = nodes with out-degree 0 (no outgoing edges = no descendants)
+        return [
+            self._idx_to_compound[idx]
+            for idx in self._graph.node_indices()
+            if self._graph.out_degree(idx) == 0
+        ]
 
     def get_level(self, level: int) -> List[Compound]:
         """
@@ -366,25 +294,13 @@ class CompoundHierarchy:
 
         Notes
         -----
-        - In building-block mode: uses Compound.level
-        - In monomer mode: uses Compound.monomer_level
-
-        Examples
-        --------
-        >>> # Get all compounds with 2 non-null building blocks
-        >>> hierarchy.get_level(2)
-        [Leu-Val, Pro-Leu, ...]
+        O(1) lookup using cached level index, populated during add_compound().
 
         References
         ----------
         THEORY.md Section 3.3: Truncation Level
         """
-        if self.mode == HierarchyMode.BUILDING_BLOCK:
-            level_attr = "level"
-        else:  # MONOMER
-            level_attr = "monomer_level"
-
-        return [c for c in self.compounds if getattr(c, level_attr) == level]
+        return self._level_index.get(level, [])
 
     def get_direct_descendants(self, compound: Compound) -> List[Compound]:
         """
@@ -400,17 +316,17 @@ class CompoundHierarchy:
         List[Compound]
             Immediate descendants (one edge away)
 
-        Notes
-        -----
-        This returns stored edges (transitive reduction).
-
         References
         ----------
         THEORY.md Section 3.1: "Descendant - Compound with fewer building blocks"
         """
-        if compound not in self.compounds:
+        if compound not in self._compound_to_idx:
             return []
-        return list(self.edges.get(compound, set()))
+
+        idx = self._compound_to_idx[compound]
+        # Get successor indices (direct outgoing edges)
+        successor_indices = self._graph.successor_indices(idx)
+        return [self._idx_to_compound[i] for i in successor_indices]
 
     def get_direct_ancestors(self, compound: Compound) -> List[Compound]:
         """
@@ -430,10 +346,13 @@ class CompoundHierarchy:
         ----------
         THEORY.md Section 3.1: "Ancestor - Compound with more building blocks"
         """
-        if compound not in self.compounds:
+        if compound not in self._compound_to_idx:
             return []
 
-        return [ancestor for ancestor, descendants_set in self.edges.items() if compound in descendants_set]
+        idx = self._compound_to_idx[compound]
+        # Get predecessor indices (direct incoming edges)
+        predecessor_indices = self._graph.predecessor_indices(idx)
+        return [self._idx_to_compound[i] for i in predecessor_indices]
 
     def size(self) -> int:
         """
@@ -444,7 +363,7 @@ class CompoundHierarchy:
         int
             Number of vertices in DAG
         """
-        return len(self.compounds)
+        return self._graph.num_nodes()
 
     def edge_count(self) -> int:
         """
@@ -455,16 +374,11 @@ class CompoundHierarchy:
         int
             Number of directed edges
         """
-        return sum(len(descendants_set) for descendants_set in self.edges.values())
+        return self._graph.num_edges()
 
     def topological_sort(self) -> List[Compound]:
         """
         Return compounds in topological order (L₀ first, bottom-up).
-
-        Uses Kahn's algorithm (THEORY.md Section 7.1) to process compounds
-        in guaranteed correct order for bottom-up traversal. Minimal elements
-        (compounds with no descendants, including L₀) are processed first,
-        followed by their ancestors in dependency order.
 
         Returns
         -------
@@ -481,69 +395,24 @@ class CompoundHierarchy:
         Processing order guarantees:
         - L₀ (all-null) processed first
         - Every compound processed after all its descendants
-        - Automatically handles gaps in levels
-        - O(V + E) complexity
-        - Stable tie-breaking: within same level, sorted by canonical sequence
-
-        Used for:
-        - Peak classification constraint propagation (THEORY.md 2.4.6, 6.8)
-        - Bottom-up analysis workflows
-        - Ensuring correct dependency order
-
-        Examples
-        --------
-        >>> sorted_compounds = hierarchy.topological_sort()
-        >>> # Process in order: L₀ first, then ancestors
-        >>> for compound in sorted_compounds:
-        ...     process(compound)  # All descendants already processed
+        - O(V + E) complexity via rustworkx
 
         References
         ----------
         THEORY.md Section 7.1: Topological Sort (Kahn's Algorithm)
-        THEORY.md Section 2.4.6: L₀ as Anchor Point
-        THEORY.md Section 6.8: DAG Constraint Propagation
         """
-        # Determine level attribute based on hierarchy mode
-        level_attr = "monomer_level" if self.mode == HierarchyMode.MONOMER else "level"
+        try:
+            # rx.topological_sort returns indices in topological order
+            # By default this is maximal → minimal, so we reverse for bottom-up
+            sorted_indices = rx.topological_sort(self._graph)
+            # Reverse to get minimal → maximal (bottom-up) order
+            return [self._idx_to_compound[idx] for idx in reversed(sorted_indices)]
+        except rx.DAGHasCycle:
+            raise RuntimeError("Cycle detected in hierarchy!")
 
-        # Count outgoing edges (out-degree) for each compound
-        # Out-degree = number of descendants (compounds this one points to)
-        # Minimal elements (L₀) have out-degree 0 (no descendants)
-        out_degree = {compound: 0 for compound in self.compounds}
-
-        for ancestor, descendants_set in self.edges.items():
-            out_degree[ancestor] = len(descendants_set)
-
-        # Start with minimal elements (out-degree 0 = no descendants, includes L₀)
-        # Sort by (level, block_support_sequence) for stable, semantically meaningful order
-        minimal = [c for c in self.compounds if out_degree[c] == 0]
-        queue = sorted(minimal, key=lambda c: (getattr(c, level_attr), c.block_support_sequence))
-        result = []
-
-        # Process compounds in dependency order (bottom-up)
-        while queue:
-            compound = queue.pop(0)
-            result.append(compound)
-
-            # Find ancestors of this compound (compounds that point to it)
-            # Reduce their out-degree (they've had one descendant processed)
-            # When ancestor's out-degree reaches 0, all its descendants processed
-            for ancestor, descendants_set in self.edges.items():
-                if compound in descendants_set:
-                    out_degree[ancestor] -= 1
-                    if out_degree[ancestor] == 0:
-                        queue.append(ancestor)
-                        # Maintain sorted order for stable tie-breaking
-                        queue.sort(key=lambda c: (getattr(c, level_attr), c.block_support_sequence))
-
-        # Verify all compounds processed (detect cycles)
-        if len(result) != len(self.compounds):
-            raise RuntimeError(
-                f"Cycle detected in hierarchy! "
-                f"Processed {len(result)} of {len(self.compounds)} compounds"
-            )
-
-        return result
+    def __contains__(self, compound: Compound) -> bool:
+        """Check if compound is in hierarchy."""
+        return compound in self._compound_to_idx
 
     def __repr__(self) -> str:
         """Detailed representation for debugging."""

@@ -28,6 +28,7 @@ Usage:
 from pathlib import Path
 import sys
 import argparse
+import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -41,7 +42,12 @@ from lcseq.application.use_cases import (
     ProcessChromatogramsUseCase,
     ProcessPooledChromatogramsUseCase,
 )
-from lcseq.presentation.visualization.plotters import LineageOffsetPlotter
+from lcseq.presentation.visualization.plotters import (
+    LineageOffsetPlotter,
+    CompoundDiagnosticPlotter,
+    LineageHeatmapPlotter,
+    generate_diagnostic_plots,
+)
 from lcseq.infrastructure import HDF5CompoundLoader, JSONExporter
 from lcseq.infrastructure.configuration.yaml_loader import ConfigurationLoader
 
@@ -113,9 +119,45 @@ def analyze_lineage(args, config):
         f"  Reduction: {len(compounds):,} → {len(lineage)} ({100*len(lineage)/len(compounds):.2f}%)"
     )
 
-    # STEP 4: Build hierarchy
+    # STEP 4: Load cLPE reference data (optional)
+    clpe_validator = None
+    alogp_map = None
+    scaffold_map = None
+
+    if args.clpe_reference:
+        print("\n" + "=" * 80)
+        print("STEP 4: Load cLPE Reference Data")
+        print("=" * 80)
+
+        from lcseq.infrastructure.loaders.clpe_reference_loader import CLPEReferenceLoader
+        from lcseq.domain.services.clpe_validator import CLPEValidator
+
+        loader = CLPEReferenceLoader()
+        ref_data = loader.load(args.clpe_reference)
+        alogp_map = ref_data.alogp_map
+        scaffold_map = ref_data.scaffold_map
+
+        # Use CLI value if provided, otherwise use config value
+        effective_clpe_threshold = (
+            args.clpe_threshold if args.clpe_threshold is not None
+            else config.validation_params['clpe_outlier_threshold']
+        )
+        effective_min_group_size = config.validation_params['clpe_min_group_size']
+
+        # t0 will be set from L0 peak during classification
+        clpe_validator = CLPEValidator(
+            t0=1.0,  # Will be updated from L0
+            outlier_threshold=effective_clpe_threshold,
+            min_group_size=effective_min_group_size,
+        )
+
+        print(f"✓ Loaded: {len(alogp_map)} AlogP values, {len(set(scaffold_map.values()))} unique scaffolds")
+        print(f"  Threshold: {effective_clpe_threshold} z-score")
+
+    # STEP 5: Build hierarchy
+    step_number = 5 if args.clpe_reference else 4
     print("\n" + "=" * 80)
-    print("STEP 4: Build Minimal Hierarchy")
+    print(f"STEP {step_number}: Build Minimal Hierarchy")
     print("=" * 80)
     print(f"Building hierarchy for lineage ({len(lineage)} compounds)...")
     print(f"  Mode: {hierarchy_mode.value}")
@@ -131,20 +173,58 @@ def analyze_lineage(args, config):
     for level in sorted(by_level.keys(), reverse=True):
         print(f"    Level {level}: {len(by_level[level])} compounds")
 
-    # STEP 5: Process chromatograms (mode-dependent)
+    # STEP 6: Process chromatograms (mode-dependent)
+    # Preprocessing is handled internally by use cases when preprocessing_params is passed
+    step_number = 6 if args.clpe_reference else 5
     print("\n" + "=" * 80)
-    print("STEP 5: Process Chromatograms")
+    print(f"STEP {step_number}: Process Chromatograms")
     print("=" * 80)
+
+    # Show detection parameters being used
+    print("\nDetection Parameters (from config):")
+    print(f"  alpha: {config.peak_detection_params['alpha']}")
+    print(f"  alpha_product: {config.peak_detection_params['alpha_product']}")
+    print(f"  min_baseline_sds: {config.peak_detection_params['min_baseline_sds']}")
+    print(f"  min_snr: {config.peak_detection_params['min_snr']}")
+    print(f"  prominence_percentile: {config.peak_detection_params['prominence_percentile']}")
+    print(f"  signal_variant: {config.peak_detection_params['signal_variant']}")
 
     if variant_mode == AnalysisMode.POOLED:
         print("Using hybrid pooled strategy (THEORY.md Section 4.2.3):")
         print("  Phase 1: Peak detection on pooled signal (expensive, once per class)")
         print("  Phase 2: Area integration on variants (cheap, per variant)")
+        if args.clpe_reference:
+            print("  cLPE validation: Enabled")
 
         process_use_case = ProcessPooledChromatogramsUseCase()
-        equivalence_classes, processed_compounds, used_hierarchy = process_use_case.execute(
+        equivalence_classes, processed_compounds, used_hierarchy, clpe_stats = process_use_case.execute(
             compounds=lineage,
             hierarchy=hierarchy,
+            # Peak detection parameters (from config)
+            alpha=config.peak_detection_params['alpha'],
+            prominence_percentile=config.peak_detection_params['prominence_percentile'],
+            min_snr=config.peak_detection_params['min_snr'],
+            min_baseline_sds=config.peak_detection_params['min_baseline_sds'],
+            signal_variant=config.peak_detection_params['signal_variant'],
+            min_dispersion_r=config.peak_detection_params['min_dispersion_r'],
+            sigma_clip_sigma=config.peak_detection_params['sigma_clip_sigma'],
+            # Peak classification parameters (from config)
+            alpha_product=config.peak_detection_params['alpha_product'],
+            truncation_margin=config.classification_params['truncation_margin'],
+            peak_matching_tolerance=config.classification_params['peak_matching_tolerance'],
+            hungarian_min_threshold=config.classification_params['hungarian_min_threshold'],
+            # Pooling parameters (from config)
+            correlation_threshold=config.validation_params['correlation_threshold'],
+            aggregation_method=config.validation_params['aggregation_method'],
+            # Validation parameters (from config)
+            include_rejected=config.peak_detection_params['include_rejected'],
+            clpe_outlier_threshold=config.validation_params['clpe_outlier_threshold'],
+            clpe_min_group_size=config.validation_params['clpe_min_group_size'],
+            # Preprocessing parameters (from config)
+            preprocessing_params=config.preprocessing_params,
+            # Optional cLPE reference (user-provided)
+            clpe_reference_csv=args.clpe_reference,
+            clpe_t0=None,  # Will be derived from L0 peak RT
         )
 
         # Build peaks_dict for plotting
@@ -171,11 +251,34 @@ def analyze_lineage(args, config):
     else:
         # Individual mode
         print("Detecting peaks using Discrete Morse Theory + Poisson statistics...")
+        if args.clpe_reference:
+            print("  cLPE validation: Enabled")
 
         process_use_case = ProcessChromatogramsUseCase()
-        peaks_dict = process_use_case.execute(
+        peaks_dict, clpe_stats = process_use_case.execute(
             compounds=lineage,
             hierarchy=hierarchy,
+            # Peak detection parameters (from config)
+            alpha=config.peak_detection_params['alpha'],
+            prominence_percentile=config.peak_detection_params['prominence_percentile'],
+            min_snr=config.peak_detection_params['min_snr'],
+            min_baseline_sds=config.peak_detection_params['min_baseline_sds'],
+            signal_variant=config.peak_detection_params['signal_variant'],
+            min_dispersion_r=config.peak_detection_params['min_dispersion_r'],
+            sigma_clip_sigma=config.peak_detection_params['sigma_clip_sigma'],
+            # Peak classification parameters (from config)
+            alpha_product=config.peak_detection_params['alpha_product'],
+            truncation_margin=config.classification_params['truncation_margin'],
+            peak_matching_tolerance=config.classification_params['peak_matching_tolerance'],
+            hungarian_min_threshold=config.classification_params['hungarian_min_threshold'],
+            # Validation parameters
+            include_rejected=config.peak_detection_params['include_rejected'],
+            # Preprocessing parameters
+            preprocessing_params=config.preprocessing_params,
+            # Optional cLPE validator
+            clpe_validator=clpe_validator,
+            alogp_map=alogp_map,
+            scaffold_map=scaffold_map,
         )
 
         processed_compounds = lineage
@@ -186,9 +289,35 @@ def analyze_lineage(args, config):
         print(f"✓ Processed: {len(lineage)} compounds")
         print(f"  Peaks: {total_peaks} total, {total_peaks/len(lineage):.1f} avg/compound")
 
-    # STEP 6: Generate plot
+    # Report cLPE statistics if enabled
+    if clpe_stats:
+        print("\n  cLPE Statistics:")
+        if clpe_stats.get("t0"):
+            print(f"    t0 (dead time): {clpe_stats['t0']:.2f} min")
+
+        levels_stats = clpe_stats.get("levels", {})
+        if levels_stats:
+            total_validated = sum(s.get("validated", 0) for s in levels_stats.values())
+            total_outliers = sum(s.get("outliers", 0) for s in levels_stats.values())
+            total_reselected = sum(s.get("reselected", 0) for s in levels_stats.values())
+
+            print(f"    Validated: {total_validated} compounds")
+            print(f"    Outliers: {total_outliers} ({100*total_outliers/total_validated:.1f}%)" if total_validated > 0 else "    Outliers: 0")
+            print(f"    Re-selected: {total_reselected}")
+
+            # Per-level details
+            for level in sorted(levels_stats.keys()):
+                level_stats = levels_stats[level]
+                n_validated = level_stats.get("validated", 0)
+                n_outliers = level_stats.get("outliers", 0)
+                n_reselected = level_stats.get("reselected", 0)
+                if n_validated > 0:
+                    print(f"      L{level}: {n_validated} validated, {n_outliers} outliers, {n_reselected} reselected")
+
+    # STEP 7: Generate plot
+    step_number = 7 if args.clpe_reference else 6
     print("\n" + "=" * 80)
-    print("STEP 6: Generate Plot")
+    print(f"STEP {step_number}: Generate Plot")
     print("=" * 80)
 
     # Build file suffix with both variant mode and hierarchy mode
@@ -209,9 +338,50 @@ def analyze_lineage(args, config):
     )
     print(f"✓ Plot saved: {plot_path.name}")
 
-    # STEP 7: Export results
+    # STEP 7b/8b: Generate Diagnostic Plots (optional)
+    n_generated = 0
+    if args.diagnostics:
+        step_number_b = f"{step_number}b"
+        print("\n" + "=" * 80)
+        print(f"STEP {step_number_b}: Generate Diagnostic Plots")
+        print("=" * 80)
+
+        diagnostics_dir = plots_dir / f"diagnostics{mode_suffix}"
+        print(f"Generating diagnostic plots for {len(processed_compounds)} compounds...")
+        print(f"  Output directory: {diagnostics_dir}")
+
+        n_generated = generate_diagnostic_plots(
+            compounds=processed_compounds,
+            hierarchy=used_hierarchy,
+            output_dir=diagnostics_dir,
+            filename_attr="block_support_sequence",
+        )
+        print(f"✓ Generated {n_generated} diagnostic plots")
+
+    # STEP 7c/8c: Generate Purity Heatmap (optional)
+    if args.heatmap:
+        step_number_c = f"{step_number}c"
+        print("\n" + "=" * 80)
+        print(f"STEP {step_number_c}: Generate Purity Heatmap")
+        print("=" * 80)
+
+        heatmap_path = plots_dir / f"heatmap{mode_suffix}_{reference.block_support_sequence}.png"
+        print(f"Building peak distribution matrix for {len(processed_compounds)} compounds...")
+
+        heatmap_plotter = LineageHeatmapPlotter()
+        heatmap_fig = heatmap_plotter.plot_from_compounds(
+            compounds=processed_compounds,
+            hierarchy=used_hierarchy,
+            title=f"Peak Distribution: {reference.block_support_sequence}",
+        )
+        heatmap_fig.savefig(heatmap_path, dpi=150, bbox_inches='tight')
+        plt.close(heatmap_fig)
+        print(f"✓ Heatmap saved: {heatmap_path.name}")
+
+    # STEP 8 or 9: Export results
+    step_number_export = 8 if args.clpe_reference else 7
     print("\n" + "=" * 80)
-    print("STEP 7: Export Results")
+    print(f"STEP {step_number_export}: Export Results")
     print("=" * 80)
 
     # Export comprehensive JSON with all analysis data
@@ -268,6 +438,10 @@ def analyze_lineage(args, config):
     print(f"\nResults: {args.output}")
     print(f"  - {plot_path.name}")
     print(f"  - {json_path.name}")
+    if args.diagnostics:
+        print(f"  - diagnostics{mode_suffix}/ ({n_generated} plots)")
+    if args.heatmap:
+        print(f"  - heatmap{mode_suffix}_{reference.block_support_sequence}.png")
 
 
 def main():
@@ -289,6 +463,12 @@ Examples:
   # Override hierarchy mode (config: monomer → building_block)
   python examples/analyze.py --reference "Phe-DNvl-DPhe" --hierarchy-mode building_block
 
+  # Enable cLPE validation with custom reference data
+  python examples/analyze.py --reference "Phe-DNvl-DPhe" --clpe-reference test_data/raw_data.csv
+
+  # Enable cLPE with custom outlier threshold
+  python examples/analyze.py --reference "Phe-DNvl-DPhe" --clpe-reference test_data/raw_data.csv --clpe-threshold 3.0
+
 Configuration:
   All parameters loaded from configs/default.yaml (Single Source of Truth).
   CLI arguments override config values when provided.
@@ -306,6 +486,14 @@ Analysis Modes:
 Hierarchy Modes:
   monomer        - DAG with convergence at monomer granularity (default)
   building_block - DAG with convergence at block granularity
+
+cLPE Validation (optional):
+  --clpe-reference - CSV with AlogP and scaffold data
+  --clpe-threshold - Z-score threshold for outlier detection (default: from config)
+
+  When enabled, validates product peaks using LogK ~ AlogP correlation
+  and re-selects outlier peaks from UNKNOWN candidates. Requires reference
+  CSV with columns: compound_id, AlogP, scaffold (or All Stereochem).
         """,
     )
 
@@ -344,6 +532,28 @@ Hierarchy Modes:
         choices=["building_block", "monomer"],
         default=None,
         help="Override hierarchy mode from config",
+    )
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Generate diagnostic plots for each compound",
+    )
+    parser.add_argument(
+        "--heatmap",
+        action="store_true",
+        help="Generate purity heatmap showing peak distribution across lineage",
+    )
+    parser.add_argument(
+        "--clpe-reference",
+        type=Path,
+        default=None,
+        help="CSV with compound_id, AlogP, scaffold columns for cLPE validation"
+    )
+    parser.add_argument(
+        "--clpe-threshold",
+        type=float,
+        default=None,
+        help="Z-score threshold for cLPE outlier detection (default: from config)"
     )
 
     args = parser.parse_args()

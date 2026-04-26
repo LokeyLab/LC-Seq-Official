@@ -1,0 +1,83 @@
+# LC-Seq Data Mapping Configuration
+# Maps test_data/raw_data.csv columns to canonical schema
+
+source:
+  format: csv
+  encoding: utf-8
+
+mappings:
+  # Compound identity fields
+  identity:
+    name: "Common_Name (N-->C)"
+    id: "Identifier"
+    library_id: "lid"
+    smiles: "enumerated_smiles"
+    product_id: "intended_product_id"
+    stereochemistry: "All Stereochem (N-->C)"
+
+  # Building block definitions (N->C order)
+  building_blocks:
+    order: "N_to_C"
+    blocks:
+      - position: 1
+        name: "BB1 Name"
+        smiles: "bb1_smiles"
+        stereochemistry: "BB1 Stereochem"
+        properties:
+          n_substitution: "BB1 N-Sub"
+          aa_count: "BB1 AA Count"
+
+      - position: 2
+        name: "BB2 Name"
+        smiles: "bb2_smiles"
+        stereochemistry: "BB2 Stereochem"
+        properties:
+          n_substitution: "BB2 N-Sub"
+          aa_count: "BB2 AA Count"
+
+      - position: 3
+        name: "BB3 Name"
+        smiles: "bb3_smiles"
+        stereochemistry: "BB3 Stereochem"
+        properties:
+          n_substitution: "BB3 N-Sub"
+          aa_count: "BB3 AA Count"
+
+  # Chemical/physical properties
+  properties:
+    exact_mass:
+      cooh: "Exact Mass (COOH)"
+      dma: "Exact Mass (DMA)"
+    logp: "AlogP"
+    h_donors: "NumHDonors"
+    h_acceptors: "NumHAcceptors"
+    aromatic_rings: "NumAromaticRings"
+    tpsa: "TPSA"
+    peptide_size: "Peptide Size"
+    n_substitution_total: "SUM Nsub"
+
+  # Retention time data
+  retention_times:
+    linear:
+      rt_minutes: "Linear RT (min)"
+      logk: "LogK10-40 (Linear)"
+    cyclized:
+      rt_minutes: "Cyclized RT (min)"
+      logk: "LogK10-40 (Cyclized)"
+    delta_rt: "Delta RT (min) (Cyclized-Linear)"
+    weighted:
+      combined: "wtd_rt"
+      by_library:
+        DEL-0044: "wtd_rt DEL-0044"
+        DEL-0045: "wtd_rt DEL-0045"
+
+  # Chromatogram/time series data
+  chromatogram:
+    total_fractions: "total_fractions"
+    max_count: "max_count"
+    time_series:
+      column: "all_datapoints"
+      format: "time:sig1;sig2, time:sig1;sig2, ..."
+      time_unit: seconds
+      channels: ["DEL-0044", "DEL-0045"]
+      delimiter: ", "

@@ -316,7 +316,7 @@ All analysis parameters are controlled by `configs/default.yaml` (Single Source 
 **Peak Detection:**
 
 - `min_persistence`: Minimum peak persistence (prominence threshold)
-- `z_threshold`: Z-score threshold for statistical significance (Poisson test)
+- `alpha`: Significance level (false positive rate) for Poisson test (default: 0.001)
 - `prominence_percentile`: Percentile for adaptive prominence filtering
 - `min_snr`: Minimum signal-to-noise ratio
 
@@ -348,7 +348,7 @@ All analysis parameters are controlled by `configs/default.yaml` (Single Source 
 
    detection:
      min_persistence: 0.03 # Lower threshold = more sensitive
-     z_threshold: 2.5 # Lower threshold = detect weaker peaks
+     alpha: 0.01 # Higher alpha = detect weaker peaks (default: 0.001)
 
    pooling:
      correlation_threshold: 0.75 # More lenient pooling threshold

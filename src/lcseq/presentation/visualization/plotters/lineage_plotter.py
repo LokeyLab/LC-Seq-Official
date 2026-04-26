@@ -20,12 +20,15 @@ from .base_plotter import BasePlotter
 from ....domain.entities import Compound, Peak
 from ....domain.entities.peak import PeakType
 from ....domain.models import HierarchyMode, CompoundHierarchy
-from ....domain.services import LineageFinderService
+from ....domain.services import SequenceAligner
+from ....domain.services.baseline_estimator import BaselineEstimatorService
 from ....config import (
     VisualizationConfig,
     PeakDetectionConfig,
+    PeakAppearanceConfig,
     DEFAULT_TRUNCATION_MARGIN,
 )
+from ..utils.signal_styler import SignalStyler
 
 
 class LineageOffsetPlotter(BasePlotter):
@@ -57,6 +60,8 @@ class LineageOffsetPlotter(BasePlotter):
             dpi=150,
             **kwargs
         )
+        # Reuse SequenceAligner across all plots (single source of truth)
+        self._aligner = SequenceAligner()
 
     def plot(
         self,
@@ -288,9 +293,9 @@ class LineageOffsetPlotter(BasePlotter):
         n_compounds: int,
         label_x_right: float,
         hierarchy: Optional[CompoundHierarchy] = None,
-        min_baseline_sds: float = 1.0,
+        min_baseline_sds: float = 0.0,
         min_snr: float = 0.5,
-        truncation_margin: float = 0.02
+        truncation_margin: float = 0.02,
     ) -> None:
         """
         Plot a single compound trace with peaks and labels.
@@ -332,56 +337,37 @@ class LineageOffsetPlotter(BasePlotter):
             Extends dashed region to show buffer zone where products cannot be selected
         """
 
-        # Get signals (using raw signal - no baseline correction per THEORY.md)
+        # Get baseline-corrected signal
         time = compound.chromatogram.time_points
-        raw_signal = compound.chromatogram.get_signal("raw")
+        signal = compound.chromatogram.get_signal("corrected")
 
         # Calculate global baseline threshold (for dotted/solid split)
-        signal_min = np.min(raw_signal)
-        signal_std = np.std(raw_signal)
-        baseline_threshold = signal_min + (min_baseline_sds * signal_std)
+        # Uses same sigma-clipping method as peak detector for consistency
+        baseline_estimator = BaselineEstimatorService()
+        background, noise_std = baseline_estimator.estimate_with_noise(signal)
+        baseline_threshold = background + (min_baseline_sds * noise_std)
 
         # NOTE: Local SNR threshold visualization is disabled because it doesn't match
         # the peak detector's threshold (detector uses SNR distribution of peak candidates,
         # not all points). Visualizing it would be misleading.
         # TODO: Fix by either computing SNR only for peak candidates or using a different approach
-        local_snr_threshold_signal = np.zeros_like(raw_signal)  # Disabled for now
+        local_snr_threshold_signal = np.zeros_like(signal)  # Disabled for now
 
         # Normalize signal for display (presentation concern)
-        signal_max = np.max(raw_signal)
+        signal_max = np.max(signal)
         if signal_max > 0:
-            normalized = raw_signal / signal_max
+            normalized = signal / signal_max
             normalized_baseline_threshold = baseline_threshold / signal_max
             normalized_snr_threshold = local_snr_threshold_signal / signal_max
         else:
-            normalized = raw_signal
+            normalized = signal
             normalized_baseline_threshold = 0.0
-            normalized_snr_threshold = np.zeros_like(raw_signal)
+            normalized_snr_threshold = np.zeros_like(signal)
 
         # Get color and styling
         color = color_map.get(compound.positional_block_sequence, "gray")
         is_reference = compound == reference
         linewidth = VisualizationConfig.LINEWIDTH_REFERENCE if is_reference else VisualizationConfig.LINEWIDTH_DEFAULT
-
-        # Interpolate signal to double resolution for smooth boundary transitions
-        # This creates intermediate points between each pair of consecutive time points
-        # allowing segment boundaries to meet smoothly without visual gaps
-        time_original = time  # Keep original for peak lookups
-        time_interp = np.zeros(2 * len(time) - 1)
-        time_interp[::2] = time  # Original points at even indices
-        time_interp[1::2] = (time[:-1] + time[1:]) / 2  # Midpoints at odd indices
-
-        # Interpolate normalized signal to match new time points
-        normalized_interp = np.interp(time_interp, time, normalized)
-        normalized_baseline_threshold_interp = np.interp(time_interp, time,
-                                                         np.full_like(time, normalized_baseline_threshold))
-        normalized_snr_threshold_interp = np.interp(time_interp, time, normalized_snr_threshold)
-
-        # Use interpolated data for plotting traces
-        time_minutes = time_interp / VisualizationConfig.SECONDS_PER_MINUTE
-        normalized = normalized_interp
-        normalized_baseline_threshold = normalized_baseline_threshold_interp[0]  # Scalar
-        normalized_snr_threshold = normalized_snr_threshold_interp
 
         # Reverse z-order: maximal (index 0) on top, minimal (index n-1) on bottom
         trace_zorder = 5 + (n_compounds - index)
@@ -389,167 +375,97 @@ class LineageOffsetPlotter(BasePlotter):
         peak_zorder = trace_zorder + 0.5
 
         # Determine truncation time for dashed line region
+        # Uses selected_peak.position (same as diagnostic plotter) for consistency
         max_truncation_time = None
         if hierarchy is not None:
-            # All compounds have the minimal (NULL, L0) compound as a truncation product
-            # Descendants' product peaks show where truncation products appear
             truncation_times = []
 
             # Get all descendants (truncation products) of this compound
             descendants = hierarchy.get_descendants(compound)
             if descendants:
                 # Find the latest (maximum) truncation product retention time
+                # Use selected_peak (same as diagnostic plotter)
                 for desc in descendants:
-                    desc_peaks = peaks_dict.get(desc, [])
-                    # Get product peaks (PUTATIVE_PRODUCT for most, NULL for minimal compound)
-                    product_peaks = [p for p in desc_peaks
-                                   if p.peak_type in (PeakType.PUTATIVE_PRODUCT, PeakType.NULL)]
-                    if product_peaks:
-                        # Use the product peak position as the truncation time
-                        truncation_times.extend([p.position for p in product_peaks])
+                    if desc.selected_peak is not None:
+                        truncation_times.append(desc.selected_peak.position)
 
-                # Use the maximum truncation time (includes NULL at ~645s and all other descendants)
+                # Use the maximum truncation time
                 if truncation_times:
                     max_truncation_time_base = max(truncation_times)
                     # Apply truncation margin to extend the dashed region
-                    # This shows the buffer zone where product peaks cannot be selected
-                    # Margin is absolute time in seconds
                     max_truncation_time = max_truncation_time_base + truncation_margin
 
-        # Plot signal with appropriate linestyle based on thresholds and truncation region
-        # Linestyle rules:
-        #   - Below any threshold (global OR local SNR): dotted (":") or dot-dash ("-.")
-        #   - Dotted (":") if NOT in truncation region
-        #   - Dot-dash ("-.") if in truncation region AND below any threshold
-        #   - Dashed ("--") if in truncation region AND above all thresholds
-        #   - Solid ("-") if after truncation region AND above all thresholds
+        # Use SignalStyler for consistent multi-style signal plotting
+        # Supports both global baseline AND local SNR thresholds
+        # Convert time to minutes (x-axis is in minutes)
+        time_minutes_arr = time / VisualizationConfig.SECONDS_PER_MINUTE
+        max_truncation_time_minutes = (
+            max_truncation_time / VisualizationConfig.SECONDS_PER_MINUTE
+            if max_truncation_time is not None else None
+        )
+        styler = SignalStyler()
+        styled = styler.analyze(
+            time=time_minutes_arr,
+            signal=normalized,
+            truncation_boundary=max_truncation_time_minutes,
+            baseline_threshold=normalized_baseline_threshold,
+            snr_threshold=normalized_snr_threshold,
+        )
 
-        # Create masks for different regions
-        # Point is above ALL thresholds only if it exceeds both global baseline AND local SNR
-        above_global_baseline = normalized >= normalized_baseline_threshold
-        above_local_snr = normalized >= normalized_snr_threshold
-        above_all_thresholds = above_global_baseline & above_local_snr
+        # Plot with color and white outline
+        styler.plot_styled(
+            ax=ax,
+            styled=styled,
+            color=color,
+            linewidth=linewidth,
+            offset=offset,
+            alpha=VisualizationConfig.ALPHA_TRACE,
+            zorder=trace_zorder,
+            white_outline=True,
+        )
 
-        if max_truncation_time is not None:
-            max_trunc_minutes = max_truncation_time / VisualizationConfig.SECONDS_PER_MINUTE
-            in_truncation_mask = time_minutes <= max_trunc_minutes
-            # Find boundary index for segment extension capping
-            boundary_idx = np.searchsorted(time_minutes, max_trunc_minutes, side='right') - 1
-        else:
-            in_truncation_mask = np.zeros(len(time_minutes), dtype=bool)
-            boundary_idx = None
-
-        # Plot segments efficiently with boundary-respecting extension for continuity
-        def plot_segments(indices, linestyle, is_truncation_region):
-            """Helper to plot continuous segments with boundary-respecting overlap and white outline.
-
-            Parameters
-            ----------
-            indices : np.ndarray
-                Indices of points in this segment
-            linestyle : str
-                Matplotlib linestyle code
-            is_truncation_region : bool
-                True if this segment is in truncation region (dashed/dot-dash),
-                False if post-truncation (solid/dotted)
-            """
-            if len(indices) == 0:
-                return
-
-            # Find continuous segments (split where diff > 1)
-            segment_splits = np.where(np.diff(indices) > 1)[0] + 1
-            segments = np.split(indices, segment_splits)
-
-            for seg in segments:
-                if len(seg) == 0:
-                    continue
-
-                # Extend segment by one point on each side for continuity,
-                # but respect truncation boundary to avoid visual artifacts
-                start = max(0, seg[0] - 1) if seg[0] > 0 else seg[0]
-                end = min(len(time_minutes), seg[-1] + 2)
-
-                # Cap extension at truncation boundary to prevent overlap
-                if boundary_idx is not None:
-                    if is_truncation_region:
-                        # Truncation segments: don't extend past boundary
-                        end = min(end, boundary_idx + 1)
-                    else:
-                        # Post-truncation segments: don't extend before boundary
-                        start = max(start, boundary_idx + 1)
-
-                # Draw white outline first (thicker, behind)
-                ax.plot(
-                    time_minutes[start:end],
-                    normalized[start:end] + offset,
-                    color='white',
-                    linewidth=linewidth + 1.5,  # Thicker for outline effect
-                    linestyle=linestyle,
-                    alpha=1.0,
-                    zorder=trace_zorder - 0.1,  # Behind the colored line
-                    solid_capstyle='round',
-                    solid_joinstyle='round',
-                )
-
-                # Draw colored line on top
-                ax.plot(
-                    time_minutes[start:end],
-                    normalized[start:end] + offset,
-                    color=color,
-                    linewidth=linewidth,
-                    linestyle=linestyle,
-                    alpha=VisualizationConfig.ALPHA_TRACE,
-                    zorder=trace_zorder,
-                )
-
-        # Plot each region with appropriate linestyle
-        if max_truncation_time is not None:
-            # Case 1: In truncation region, below any threshold → dot-dash ("-.")
-            trunc_below_idx = np.where(in_truncation_mask & ~above_all_thresholds)[0]
-            plot_segments(trunc_below_idx, "-.", is_truncation_region=True)
-
-            # Case 2: In truncation region, above all thresholds → dashed ("--")
-            trunc_above_idx = np.where(in_truncation_mask & above_all_thresholds)[0]
-            plot_segments(trunc_above_idx, "--", is_truncation_region=True)
-
-            # Case 3: After truncation, below any threshold → dotted (":")
-            post_trunc_below_idx = np.where(~in_truncation_mask & ~above_all_thresholds)[0]
-            plot_segments(post_trunc_below_idx, ":", is_truncation_region=False)
-
-            # Case 4: After truncation, above all thresholds → solid ("-")
-            post_trunc_above_idx = np.where(~in_truncation_mask & above_all_thresholds)[0]
-            plot_segments(post_trunc_above_idx, "-", is_truncation_region=False)
-        else:
-            # No truncation region: simpler logic
-            # Below any threshold → dotted (":")
-            below_idx = np.where(~above_all_thresholds)[0]
-            plot_segments(below_idx, ":", is_truncation_region=False)
-
-            # Above all thresholds → solid ("-")
-            above_idx = np.where(above_all_thresholds)[0]
-            plot_segments(above_idx, "-", is_truncation_region=False)
+        # Keep interpolated data for peak plotting (now in minutes)
+        time_interp = styled.time_interp
+        signal_interp = styled.signal_interp
+        time_minutes = time / VisualizationConfig.SECONDS_PER_MINUTE
 
         # Plot peaks with different markers based on peak type
+        # Matches diagnostic plotter exactly: hollow gray for rejected, colored for accepted
         peaks = peaks_dict.get(compound, [])
+
         for peak in peaks:
-            # Find peak position in interpolated data
-            # Peaks were detected on original time points, so find closest interpolated point
-            idx = np.argmin(np.abs(time_interp - peak.position))
+            # Find peak position in interpolated data (both in minutes)
             peak_time = peak.position / VisualizationConfig.SECONDS_PER_MINUTE
+            idx = np.argmin(np.abs(time_interp - peak_time))
 
             # Get marker shape and size based on peak type
-            marker, marker_size = self._get_peak_marker(peak.peak_type)
+            marker, marker_size = PeakAppearanceConfig.get_marker(peak.peak_type)
+            peak_color = PeakAppearanceConfig.get_color(peak.peak_type)
 
-            ax.plot(
-                peak_time,
-                normalized[idx] + offset,
-                marker,
-                color=color,
-                markersize=marker_size,
-                markeredgecolor="white",
-                markeredgewidth=0.5,
-                zorder=peak_zorder,
-            )
+            # Use hollow markers for rejected peaks (same as diagnostic plotter)
+            if peak.is_rejected:
+                ax.plot(
+                    peak_time,
+                    signal_interp[idx] + offset,
+                    marker,
+                    color='gray',
+                    markersize=marker_size * 0.8,
+                    markerfacecolor='none',
+                    markeredgecolor='gray',
+                    markeredgewidth=1.5,
+                    zorder=peak_zorder - 0.1,
+                )
+            else:
+                ax.plot(
+                    peak_time,
+                    signal_interp[idx] + offset,
+                    marker,
+                    color=peak_color,
+                    markersize=marker_size,
+                    markeredgecolor="white",
+                    markeredgewidth=1.0,
+                    zorder=peak_zorder,
+                )
 
         # Add validation indicator on left side
         # Green check if expected peak found:
@@ -612,36 +528,6 @@ class LineageOffsetPlotter(BasePlotter):
             zorder=0,
         )
 
-    def _get_peak_marker(self, peak_type: PeakType) -> tuple[str, float]:
-        """
-        Get matplotlib marker shape and size for peak type.
-
-        Parameters
-        ----------
-        peak_type : PeakType
-            Peak classification type
-
-        Returns
-        -------
-        tuple[str, float]
-            (marker_code, marker_size)
-
-        Notes
-        -----
-        Marker mapping:
-        - NULL: 's' (square) - DNA tag only (L₀)
-        - TRUNCATION: 'D' (diamond) - incomplete synthesis
-        - PUTATIVE_PRODUCT: 'o' (large circle) - expected product
-        - UNKNOWN: '^' (triangle) - unclassified
-        """
-        marker_map = {
-            PeakType.NULL: ('s', VisualizationConfig.MARKER_SIZE),           # Square
-            PeakType.TRUNCATION: ('D', VisualizationConfig.MARKER_SIZE),     # Diamond
-            PeakType.PUTATIVE_PRODUCT: ('o', VisualizationConfig.MARKER_SIZE * 1.5),  # Large circle
-            PeakType.UNKNOWN: ('^', VisualizationConfig.MARKER_SIZE),        # Triangle
-        }
-        return marker_map.get(peak_type, ('o', VisualizationConfig.MARKER_SIZE))  # Default to circle
-
     def _format_compound_label(
         self,
         compound: Compound,
@@ -682,172 +568,13 @@ class LineageOffsetPlotter(BasePlotter):
         else:  # BUILDING_BLOCK
             level = compound.level
 
-        # Perform MSA-style alignment
-        aligned_seq = self._align_to_reference(
+        # Perform MSA-style alignment using SequenceAligner (single source of truth)
+        aligned_seq = self._aligner.align_to_reference(
             compound, alignment_reference, hierarchy_mode
         )
 
         label = f"{aligned_seq}  (L{level})"
         return label
-
-    def _align_to_reference(
-        self,
-        compound: Compound,
-        reference: Compound,
-        hierarchy_mode: HierarchyMode
-    ) -> str:
-        """
-        Align compound sequence to reference using MSA-style gaps.
-
-        Building-block mode: Position-based alignment (trivial)
-        Monomer mode: Subsequence alignment to reference
-
-        Parameters
-        ----------
-        compound : Compound
-            Compound to align
-        reference : Compound
-            Reference compound (alignment template)
-        hierarchy_mode : HierarchyMode
-            Alignment mode
-
-        Returns
-        -------
-        str
-            Aligned sequence with "----" gaps for nulls/missing monomers
-        """
-        if hierarchy_mode == HierarchyMode.BUILDING_BLOCK:
-            return self._align_building_blocks(compound, reference)
-        else:  # MONOMER
-            return self._align_monomers(compound, reference)
-
-    def _align_building_blocks(self, compound: Compound, reference: Compound) -> str:
-        """
-        Align building blocks by block support sequence (subsequence matching).
-
-        In building block mode, alignment is based on non-null blocks only.
-        Uses greedy left-to-right subsequence matching to find which reference
-        blocks are present in the compound. Missing blocks become gaps.
-
-        Parameters
-        ----------
-        compound : Compound
-            Compound to align
-        reference : Compound
-            Reference compound (defines gap lengths)
-
-        Returns
-        -------
-        str
-            Block-support-aligned sequence with gaps for missing blocks
-
-        Examples
-        --------
-        >>> # Reference support: Leu-LA03-Pro-Leu-DLeuMe-DPro (3 blocks)
-        >>> # Compound support:  Leu----------Leu-DLeuMe-DPro (2 blocks, missing LA03-Pro)
-        >>> aligned = _align_building_blocks(compound, reference)
-        >>> aligned
-        'Leu----------Leu-DLeuMe-DPro'  # Gap matches "LA03-Pro" length (10 chars including hyphen)
-
-        Notes
-        -----
-        This aligns by block support sequence (non-null blocks), NOT by synthesis
-        position. Positions are ignored in building block mode.
-        """
-        # Get block support sequences (non-null blocks only)
-        compound_support_blocks = [bb.code for bb in reversed(compound.building_blocks) if not bb.is_null]
-        reference_support_blocks = [bb.code for bb in reversed(reference.building_blocks) if not bb.is_null]
-
-        # Handle all-null case
-        if not compound_support_blocks:
-            # All gaps - total length should match reference support
-            total_length = sum(len(bb) for bb in reference_support_blocks) + len(reference_support_blocks) - 1
-            return "-" * total_length
-
-        # Use greedy left-to-right subsequence matching (same logic as lineage finder)
-        # Find which reference blocks are present in compound
-        ref_idx = 0
-        compound_idx = 0
-        aligned = []
-
-        while ref_idx < len(reference_support_blocks):
-            ref_block = reference_support_blocks[ref_idx]
-
-            # Check if current compound block matches this reference block
-            if compound_idx < len(compound_support_blocks) and compound_support_blocks[compound_idx] == ref_block:
-                # Match found - add the block
-                aligned.append(ref_block)
-                compound_idx += 1
-            else:
-                # No match - add gap with length matching reference block
-                aligned.append("-" * len(ref_block))
-
-            ref_idx += 1
-
-        return "-".join(aligned)
-
-    def _align_monomers(self, compound: Compound, reference: Compound) -> str:
-        """
-        Align monomers using subsequence mapping to reference.
-
-        Uses LineageFinderService to get position mappings via greedy subsequence
-        matching. Inserts gaps (dashes) where monomers are missing.
-
-        Parameters
-        ----------
-        compound : Compound
-            Compound to align (subsequence of reference)
-        reference : Compound
-            Reference compound (full sequence template)
-
-        Returns
-        -------
-        str
-            Subsequence-aligned sequence with gaps (no spaces, joined by "-")
-
-        Examples
-        --------
-        >>> # Reference: Leu-LA03-Pro-Leu-DPro (5 monomers, positions 0-4)
-        >>> # Compound:  Leu-Pro-DPro (3 monomers)
-        >>> # Mapping:   [0, 2, 4] (matches at ref positions 0, 2, 4)
-        >>> aligned = _align_monomers(compound, reference)
-        >>> aligned
-        'Leu-----Pro---DPro'  # Gaps at pos 1 (LA03=5 chars) and 3 (Leu=3 chars)
-        """
-        # Use domain service to get subsequence alignment mapping
-        lineage_finder = LineageFinderService()
-        mapping = lineage_finder.get_monomer_alignment_mapping(compound, reference)
-
-        # Get reference monomers for gap sizing
-        reference_monomers = []
-        for bb in reversed(reference.building_blocks):
-            reference_monomers.extend(bb.decompose_to_monomers())
-
-        # Get candidate monomers
-        candidate_monomers = []
-        for bb in reversed(compound.building_blocks):
-            candidate_monomers.extend(bb.decompose_to_monomers())
-
-        # Handle all-null case
-        if not mapping:
-            # All gaps (all positions in reference)
-            return "-".join("-" * len(m) for m in reference_monomers)
-
-        # Build aligned sequence using mapping
-        aligned = []
-        cand_idx = 0
-
-        for ref_idx, ref_monomer in enumerate(reference_monomers):
-            if cand_idx < len(mapping) and mapping[cand_idx] == ref_idx:
-                # Candidate has monomer at this reference position
-                aligned.append(candidate_monomers[cand_idx])
-                cand_idx += 1
-            else:
-                # Gap: candidate missing monomer at this position
-                # Use dashes matching reference monomer length
-                aligned.append("-" * len(ref_monomer))
-
-        return "-".join(aligned)
 
     def _format_plot(
         self,
@@ -930,50 +657,23 @@ class LineageOffsetPlotter(BasePlotter):
         Creates a horizontal legend positioned below the x-axis, centered on the plot.
         Shows both peak type markers and signal region line styles.
         """
-        # Create custom legend handles for peak markers
-        marker_handles = [
-            Line2D([0], [0], marker='s', color='black', linestyle='None',
-                   markersize=6, markeredgecolor='white', markeredgewidth=0.5,
-                   label='NULL (L₀)'),
-            Line2D([0], [0], marker='D', color='black', linestyle='None',
-                   markersize=6, markeredgecolor='white', markeredgewidth=0.5,
-                   label='Truncation'),
-            Line2D([0], [0], marker='o', color='black', linestyle='None',
-                   markersize=9, markeredgecolor='white', markeredgewidth=0.5,
-                   label='Product'),
-            Line2D([0], [0], marker='^', color='black', linestyle='None',
-                   markersize=6, markeredgecolor='white', markeredgewidth=0.5,
-                   label='Unknown'),
-        ]
+        # Create legend handles using PeakAppearanceConfig
+        marker_handles = PeakAppearanceConfig.create_legend_handles(include_rejected=True)
+        line_handles = PeakAppearanceConfig.create_linestyle_handles(include_truncation=True)
 
-        # Create custom legend handles for line styles
-        line_handles = [
-            Line2D([0], [0], color='black', linestyle='-', linewidth=2,
-                   label='Valid region'),
-            Line2D([0], [0], color='black', linestyle='--', linewidth=2,
-                   label='Before latest truncation'),
-            Line2D([0], [0], color='black', linestyle='-.', linewidth=2,
-                   label='Before latest truncation and below threshold'),
-            Line2D([0], [0], color='black', linestyle=':', linewidth=2,
-                   label='Below thresholds'),
-        ]
-
-        # Combine all handles and labels (markers first row, line styles second row)
         all_handles = marker_handles + line_handles
-        all_labels = [h.get_label() for h in all_handles]
 
-        # Add legend at bottom center with 2-row layout (no frame)
+        # Legend at bottom center, below x-axis label
         ax.legend(
-            all_handles,
-            all_labels,
+            handles=all_handles,
             loc='upper center',
-            bbox_to_anchor=(0.5, -0.04),  # Centered horizontally, closer to x-axis
-            ncol=4,  # 4 columns: wraps to 2 rows (markers above, line styles below)
-            frameon=False,  # No box around legend
-            fontsize=9,
-            handlelength=2,
+            bbox_to_anchor=(0.5, -0.04),
+            ncol=5,
+            frameon=False,
+            fontsize=8,
+            handlelength=1.5,
             handleheight=1,
-            columnspacing=1.5,
+            columnspacing=1.0,
         )
 
     def _compute_local_snr_threshold(

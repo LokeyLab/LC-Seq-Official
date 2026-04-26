@@ -88,8 +88,8 @@ python examples/analyze.py --reference "Phe-DNvl-DPhe" --config configs/my_exper
 ```yaml
 detection:
   min_persistence: 0.03 # Lower = more sensitive (default: 0.05)
-  z_threshold: 2.5 # Lower = detect weaker peaks (default: 3.0)
-  prominence_percentile: 0.3 # Lower = retain more peaks (default: 0.5)
+  alpha: 0.01 # Higher alpha = detect weaker peaks (default: 0.001)
+  prominence_percentile: 0.3 # Lower = retain more peaks (default: 0.0)
 ```
 
 **Change pooling behavior:**

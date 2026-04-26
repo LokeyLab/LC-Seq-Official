@@ -5,26 +5,19 @@ This use case implements the hybrid pooled strategy from THEORY.md Section 4.2.3
 - Phase 2: Area integration on individual variants (cheap, per variant)
 """
 
-from typing import List, Dict, Optional, Tuple
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple, Any
+from tqdm import tqdm
 from lcseq.domain.entities import Compound, PooledCompound
 from lcseq.domain.models import EquivalenceClass, CompoundHierarchy, PoolingStatus
 from lcseq.domain.services import (
     SignalAggregator,
     EquivalenceClassBuilder,
     HierarchyBuilder,
+    SignalPreprocessor,
+    PreprocessingConfig,
 )
 from lcseq.application.use_cases import ProcessChromatogramsUseCase
-
-from lcseq.config import (
-    DEFAULT_Z_THRESHOLD,
-    DEFAULT_PROMINENCE_PERCENTILE,
-    DEFAULT_MIN_SNR,
-    DEFAULT_MIN_BASELINE_SDS,
-    DEFAULT_SIGNAL_VARIANT,
-    DEFAULT_TRUNCATION_MARGIN,
-    DEFAULT_CORRELATION_THRESHOLD,
-    DEFAULT_AGGREGATION_METHOD,
-)
 
 
 class ProcessPooledChromatogramsUseCase:
@@ -80,15 +73,33 @@ class ProcessPooledChromatogramsUseCase:
         self,
         compounds: List[Compound],
         hierarchy: CompoundHierarchy,
-        z_threshold: float = DEFAULT_Z_THRESHOLD,
-        prominence_percentile: float = DEFAULT_PROMINENCE_PERCENTILE,
-        min_snr: float = DEFAULT_MIN_SNR,
-        min_baseline_sds: float = DEFAULT_MIN_BASELINE_SDS,
-        signal_variant: str = DEFAULT_SIGNAL_VARIANT,
-        truncation_margin: float = DEFAULT_TRUNCATION_MARGIN,
-        correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD,
-        aggregation_method: str = DEFAULT_AGGREGATION_METHOD,
-    ) -> Tuple[Dict[str, EquivalenceClass], List[Compound], CompoundHierarchy]:
+        # Peak detection parameters
+        alpha: float,
+        prominence_percentile: float,
+        min_snr: float,
+        min_baseline_sds: float,
+        signal_variant: str,
+        min_dispersion_r: float,
+        sigma_clip_sigma: float,
+        # Peak classification parameters
+        alpha_product: float,
+        truncation_margin: float,
+        peak_matching_tolerance: float,
+        hungarian_min_threshold: float,
+        # Pooling parameters
+        correlation_threshold: float,
+        aggregation_method: str,
+        # Validation parameters
+        include_rejected: bool,
+        clpe_outlier_threshold: float,
+        clpe_min_group_size: int,
+        # Preprocessing parameters
+        preprocessing_params: Dict[str, Any],
+        # Optional cLPE reference (user-provided file path)
+        clpe_reference_csv: Optional[Path] = None,
+        # Optional dead time (None = derive from L0 peak RT)
+        clpe_t0: Optional[float] = None,
+    ) -> Tuple[Dict[str, EquivalenceClass], List[Compound], CompoundHierarchy, Optional[Dict[str, Any]]]:
         """
         Process chromatograms using hybrid pooled mode.
 
@@ -98,8 +109,8 @@ class ProcessPooledChromatogramsUseCase:
             All compounds to process
         hierarchy : CompoundHierarchy
             Compound hierarchy for peak classification
-        z_threshold : float
-            Poisson Z-score threshold
+        alpha : float
+            Significance level (false positive rate)
         prominence_percentile : float
             Prominence percentile threshold
         min_snr : float
@@ -114,13 +125,22 @@ class ProcessPooledChromatogramsUseCase:
             Minimum correlation for pooling validity
         aggregation_method : str
             Aggregation method ("mean" or "median")
+        clpe_reference_csv : Path, optional
+            Path to CSV with AlogP and scaffold data for cLPE validation
+        clpe_t0 : float, optional
+            Dead time for cLPE LogK calculation (if None, uses L0 peak RT)
+        clpe_outlier_threshold : float
+            Z-score threshold for cLPE outlier detection (default 2.5)
+        clpe_min_group_size : int
+            Min compounds per scaffold for cLPE model fitting (default 5)
 
         Returns
         -------
-        Tuple[Dict[str, EquivalenceClass], List[Compound], CompoundHierarchy]
+        Tuple[Dict[str, EquivalenceClass], List[Compound], CompoundHierarchy, Optional[Dict]]
             - Dictionary mapping block support sequence to equivalence class with results
             - List of pooled compounds (PooledCompound or Compound)
             - Quotient hierarchy (one node per equivalence class)
+            - cLPE statistics (if validation enabled), None otherwise
 
         Notes
         -----
@@ -138,6 +158,10 @@ class ProcessPooledChromatogramsUseCase:
         3. Process ALL pooled compounds through standard pipeline (reuses existing logic!)
         4. Copy results from pooled compounds to all variants in class
 
+        If cLPE validation is enabled (clpe_reference_csv provided):
+        - cLPE validation runs at each level during classification
+        - Outlier peaks may be re-selected from UNKNOWN peaks
+
         References
         ----------
         THEORY.md Section 4.2.3: Hybrid Pooled Strategy
@@ -153,7 +177,14 @@ class ProcessPooledChromatogramsUseCase:
         pooled_compounds = []
         results = {}
 
-        for eq_class in equivalence_classes:
+        show_progress = len(equivalence_classes) > 100
+        eq_iter = tqdm(
+            equivalence_classes,
+            desc="Creating pooled compounds",
+            disable=not show_progress,
+            unit="class"
+        )
+        for eq_class in eq_iter:
             # Convert Set to List for processing
             variants = list(eq_class.members)
 
@@ -201,6 +232,17 @@ class ProcessPooledChromatogramsUseCase:
             # Store result
             results[eq_class.block_support_sequence] = eq_class
 
+        # Step 2b: Apply preprocessing to all chromatograms if enabled
+        # This ensures all signals have the "corrected" variant for peak detection
+        preprocessing_config = PreprocessingConfig.from_dict(preprocessing_params)
+        if preprocessing_config.enabled:
+            preprocessor = SignalPreprocessor(preprocessing_config)
+            for pooled_compound in pooled_compounds:
+                if pooled_compound.chromatogram is not None:
+                    # Only preprocess if the chromatogram doesn't already have the corrected variant
+                    if not pooled_compound.chromatogram.has_signal_variant("corrected"):
+                        preprocessor.preprocess(pooled_compound.chromatogram)
+
         # Step 3: Build quotient hierarchy by projecting original hierarchy edges
         # We cannot rebuild from scratch because PooledCompounds only know about one variant
         # Instead, we project edges from the original hierarchy onto equivalence classes
@@ -229,16 +271,22 @@ class ProcessPooledChromatogramsUseCase:
         # Project edges from original hierarchy
         # IMPORTANT: Use get_direct_descendants() to avoid creating transitive edges
         # We want to preserve the DAG structure, not create a transitive closure
+        #
+        # OPTIMIZATION: Only iterate over ONE representative per equivalence class
+        # All variants in a class share the same edges (same block_support_sequence)
+        # This reduces iterations from 64k compounds to ~1.5k equivalence classes
         edges_added = set()
-        for compound in hierarchy.compounds:
-            if compound not in compound_to_block_support:
+        for eq_class in equivalence_classes:
+            # Get one representative from this class
+            representative = next(iter(eq_class.members))
+            if representative not in compound_to_block_support:
                 continue
 
-            ancestor_block_support = compound_to_block_support[compound]
+            ancestor_block_support = eq_class.block_support_sequence
             ancestor_pooled = block_support_to_pooled[ancestor_block_support]
 
             # Get only direct descendants (not transitive closure)
-            direct_descendants = hierarchy.get_direct_descendants(compound)
+            direct_descendants = hierarchy.get_direct_descendants(representative)
             for desc in direct_descendants:
                 if desc not in compound_to_block_support:
                     continue
@@ -252,21 +300,52 @@ class ProcessPooledChromatogramsUseCase:
                     quotient_hierarchy.add_edge(ancestor_pooled, desc_pooled)
                     edges_added.add(edge)
 
-        # Step 4: Process pooled compounds through standard pipeline with quotient hierarchy
+        # Step 4: Load cLPE reference data if provided
+        clpe_validator = None
+        alogp_map = None
+        scaffold_map = None
+
+        if clpe_reference_csv:
+            from lcseq.domain.services.clpe_validator import CLPEValidator
+            from lcseq.infrastructure.loaders.clpe_reference_loader import CLPEReferenceLoader
+
+            loader = CLPEReferenceLoader()
+            ref_data = loader.load(clpe_reference_csv)
+            alogp_map = ref_data.alogp_map
+            scaffold_map = ref_data.scaffold_map
+
+            # t0 will be updated from L0 peak during classification if not provided
+            clpe_validator = CLPEValidator(
+                t0=clpe_t0 or 1.0,
+                outlier_threshold=clpe_outlier_threshold,
+                min_group_size=clpe_min_group_size,
+            )
+
+        # Step 5: Process pooled compounds through standard pipeline with quotient hierarchy
         # This ensures pooled compounds' descendants are other pooled compounds,
         # not individual variants from the original hierarchy
-        peaks_dict = self.process_use_case.execute(
+        peaks_dict, clpe_stats = self.process_use_case.execute(
             compounds=pooled_compounds,
             hierarchy=quotient_hierarchy,  # Quotient hierarchy!
-            z_threshold=z_threshold,
+            alpha=alpha,
             prominence_percentile=prominence_percentile,
             min_snr=min_snr,
             min_baseline_sds=min_baseline_sds,
             signal_variant=signal_variant,
+            min_dispersion_r=min_dispersion_r,
+            sigma_clip_sigma=sigma_clip_sigma,
+            alpha_product=alpha_product,
             truncation_margin=truncation_margin,
+            peak_matching_tolerance=peak_matching_tolerance,
+            hungarian_min_threshold=hungarian_min_threshold,
+            include_rejected=include_rejected,
+            preprocessing_params=preprocessing_params,
+            clpe_validator=clpe_validator,
+            alogp_map=alogp_map,
+            scaffold_map=scaffold_map,
         )
 
-        # Step 5: Copy results from pooled compounds to all variants in each class
+        # Step 6: Copy results from pooled compounds to all variants in each class
         for pooled_compound, eq_class in pooled_compound_to_class.items():
             variants = list(eq_class.members)
 
@@ -278,4 +357,4 @@ class ProcessPooledChromatogramsUseCase:
                 variant.detected_peaks = pooled_compound.detected_peaks
                 variant.selected_peak = pooled_compound.selected_peak
 
-        return results, pooled_compounds, quotient_hierarchy
+        return results, pooled_compounds, quotient_hierarchy, clpe_stats

@@ -51,7 +51,7 @@ class PoolingValidator:
     0.92
     """
 
-    def __init__(self, correlation_threshold: float = 0.8):
+    def __init__(self, correlation_threshold: float):
         """
         Initialize pooling validator.
 

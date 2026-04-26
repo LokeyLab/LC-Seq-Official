@@ -56,6 +56,11 @@ class Compound:
     selected_peak: Optional[Peak] = None
     compound_id: Optional[str] = None
 
+    # cLPE validation reference data (loaded from external source)
+    # LogK is computed from OBSERVED RT, not loaded from reference
+    alogp: Optional[float] = None  # Calculated lipophilicity from structure
+    scaffold_group: Optional[str] = None  # Stereochemistry grouping for cLPE regression
+
     def __post_init__(self) -> None:
         """Validate compound properties."""
         if not self.building_blocks:

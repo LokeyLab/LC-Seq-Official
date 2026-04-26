@@ -13,6 +13,7 @@ from .analysis_configuration import (
     HierarchyMode as ConfigHierarchyMode,
 )
 from .analysis_result import AnalysisResult
+from .coupling_efficiency import CycleEfficiency, CompoundEfficiency
 
 __all__ = [
     "CompoundHierarchy",
@@ -24,4 +25,6 @@ __all__ = [
     "AnalysisMode",
     "ConfigHierarchyMode",
     "AnalysisResult",
+    "CycleEfficiency",
+    "CompoundEfficiency",
 ]
